@@ -1,0 +1,71 @@
+"""Commit stage: commit changes using rpi-commit skill."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from ..display import display
+from ..process import run_claude_structured
+from ..snapshot import save_snapshot
+
+
+class CommitResult(BaseModel):
+    status: Literal["success", "failed", "nothing_to_commit"]
+    num_commits: int = Field(description="Number of commits created")
+    commits: list[str] = Field(description="Commit subject lines, in order")
+    summary: str = Field(description="One-line description of what was committed")
+    errors: str = Field(description="Any errors encountered, or 'None'")
+
+
+def _dry_run_commit() -> CommitResult:
+    return CommitResult(
+        status="success",
+        num_commits=1,
+        commits=["(dry run commit)"],
+        summary="(dry run)",
+        errors="None",
+    )
+
+
+class CommitStage:
+    name = "commit"
+    label = "Stage 4: Commit"
+
+    def should_skip(self, ctx) -> bool:
+        return ctx.config.skip_commit
+
+    def run(self, ctx) -> None:
+        config = ctx.config
+        result = run_claude_structured(
+            prompt=(
+                f"Run /rpi-commit to commit changes related to the plan at {config.plan_path}. "
+                "Read the plan file first to understand what this plan covers, then only commit "
+                "changes that are relevant to the plan. Leave unrelated changes unstaged."
+            ),
+            schema=CommitResult,
+            effort="medium",
+            work_dir=ctx.work_dir,
+            dry_run=config.dry_run,
+            worktree=config.worktree,
+            dry_run_default=_dry_run_commit(),
+        )
+
+        display.result_panel("Commit", result)
+        display.info(f"[green]Stage 4 complete:[/green] {result.status}")
+        ctx.commit_result = result
+        ctx.progress.commit_done = True
+
+    def execute(self, ctx) -> None:
+        display.stage_bar(self.name)
+        if self.should_skip(ctx):
+            display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
+            return
+        display.stage_header(self.label)
+        self.run(ctx)
+        self._snapshot(ctx)
+
+    def _snapshot(self, ctx) -> None:
+        if ctx.snap_dir is not None:
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
