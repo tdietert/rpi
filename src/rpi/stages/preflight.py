@@ -5,8 +5,10 @@ from __future__ import annotations
 from ..display import display
 from ..plan import run_plan_processing
 
+from . import Stage
 
-class PreflightStage:
+
+class PreflightStage(Stage):
     name = "preflight"
     label = "Pre-flight: parse plan structure"
 
@@ -37,8 +39,3 @@ class PreflightStage:
         display.stage_header(self.label)
         self.run(ctx)
         self._snapshot(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        from ..snapshot import save_snapshot
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from . import Stage
 from ..display import display
 from ..feedback import collect_feedback
 from ..plan import (
@@ -72,7 +73,7 @@ and verification commands
 - Include a testing strategy, risks, and open questions"""
 
 
-class PlanDraftStage:
+class PlanDraftStage(Stage):
     name = "plan_draft"
     label = "Plan Draft"
 
@@ -205,16 +206,3 @@ class PlanDraftStage:
             )
         return plan
 
-    def execute(self, ctx) -> None:
-        display.stage_bar(self.name)
-        if self.should_skip(ctx):
-            display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
-        display.stage_header(self.label)
-        self.run(ctx)
-        self._snapshot(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            from ..snapshot import save_snapshot
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

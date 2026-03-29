@@ -19,7 +19,9 @@ from ..diagnosis import (
 from ..display import display
 from ..plan import PlanPhase
 from ..process import confirm, run_claude_structured
-from ..snapshot import SnapshotPhaseProgress, save_snapshot
+from ..snapshot import SnapshotPhaseProgress
+
+from . import Stage
 
 
 # -- Types local to implement stage -------------------------------------------
@@ -98,7 +100,7 @@ def _format_phase_prompt(phase: PlanPhase, plan_path: Path) -> str:
 # -- Stage class --------------------------------------------------------------
 
 
-class ImplementStage:
+class ImplementStage(Stage):
     name = "implement"
     label = "Stage 2: Implementation"
 
@@ -287,7 +289,3 @@ class ImplementStage:
             return
         self.run(ctx)
         self._snapshot(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

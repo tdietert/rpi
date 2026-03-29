@@ -15,10 +15,12 @@ from ..review import (
     _write_iteration_history,
     run_review_quorum,
 )
-from ..snapshot import SnapshotReviewProgress, save_snapshot
+from ..snapshot import SnapshotReviewProgress
+
+from . import Stage
 
 
-class ReviewFixStage:
+class ReviewFixStage(Stage):
     name = "review_fix"
     label = "Stage 3: Review-Fix"
 
@@ -157,7 +159,3 @@ class ReviewFixStage:
             return
         self.run(ctx)
         self._snapshot(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..display import display
 from ..process import run_claude_structured
-from ..snapshot import save_snapshot
+from . import Stage
 
 
 class PrResult(BaseModel):
@@ -56,7 +56,7 @@ def _run_push(dry_run: bool, worktree: str = "") -> bool:
         return False
 
 
-class PushPrStage:
+class PushPrStage(Stage):
     name = "push_pr"
     label = "Stage 5: Push/PR"
 
@@ -109,6 +109,3 @@ class PushPrStage:
             ctx.progress.push_or_pr_done = True
             self._snapshot(ctx)
 
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

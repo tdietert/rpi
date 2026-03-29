@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..display import display
 from ..process import run_claude_structured
-from ..snapshot import save_snapshot
+from . import Stage
 
 
 class CommitResult(BaseModel):
@@ -29,7 +29,7 @@ def _dry_run_commit() -> CommitResult:
     )
 
 
-class CommitStage:
+class CommitStage(Stage):
     name = "commit"
     label = "Stage 4: Commit"
 
@@ -57,15 +57,3 @@ class CommitStage:
         ctx.commit_result = result
         ctx.progress.commit_done = True
 
-    def execute(self, ctx) -> None:
-        display.stage_bar(self.name)
-        if self.should_skip(ctx):
-            display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
-        display.stage_header(self.label)
-        self.run(ctx)
-        self._snapshot(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

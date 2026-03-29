@@ -16,10 +16,12 @@ from ..review import (
     _write_iteration_history,
     run_review_quorum,
 )
-from ..snapshot import SnapshotReviewProgress, save_snapshot
+from ..snapshot import SnapshotReviewProgress
+
+from . import Stage
 
 
-class PlanReviewStage:
+class PlanReviewStage(Stage):
     name = "plan_review"
     label = "Stage 1: Plan Review"
 
@@ -163,7 +165,3 @@ class PlanReviewStage:
             display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
             return
         self.run(ctx)
-
-    def _snapshot(self, ctx) -> None:
-        if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)
