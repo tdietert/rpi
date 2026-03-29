@@ -43,7 +43,7 @@ class PlanPhase(BaseModel):
     )
 
 
-class ParsedPlan(BaseModel):
+class Plan(BaseModel):
     title: str = Field(min_length=1, description="Plan title from the top-level heading")
     overview: str = Field(min_length=1, description="1-3 sentence overview of the plan")
     current_state: str = Field(min_length=1, description="Summary of the current state section")
@@ -182,10 +182,98 @@ def validate_plan_file(path: Path) -> list[str]:
     return errors
 
 
+# -- Plan serialization ------------------------------------------------------
+
+
+def serialize_plan_to_markdown(
+    plan: Plan,
+    task_description: str,
+    date: str,
+    research_path: str | None = None,
+) -> str:
+    """Serialize a Plan object to markdown matching the format validate_plan_file() expects."""
+    lines: list[str] = []
+
+    # YAML frontmatter
+    lines.append("---")
+    lines.append(f"date: {date}")
+    lines.append(f'task: "{task_description}"')
+    if research_path is not None:
+        lines.append(f"research: {research_path}")
+    lines.append("status: draft")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"# {plan.title} Implementation Plan")
+    lines.append("")
+    lines.append("## Overview")
+    lines.append("")
+    lines.append(plan.overview)
+    lines.append("")
+    lines.append("## Current State")
+    lines.append("")
+    lines.append(plan.current_state)
+    lines.append("")
+    lines.append("## Desired End State")
+    lines.append("")
+    lines.append(plan.desired_end_state)
+    lines.append("")
+    lines.append("## Implementation Phases")
+    lines.append("")
+
+    for phase in plan.phases:
+        lines.append(f"### Phase {phase.number}: {phase.name}")
+        lines.append("")
+        lines.append(f"**Goal:** {phase.goal}")
+        lines.append("")
+        lines.append("#### Tasks")
+        lines.append("")
+
+        for task in phase.tasks:
+            lines.append(f"##### Task {task.id}: {task.name}")
+            lines.append(f"**Files:** {', '.join(task.files)}")
+            lines.append(f"**Group:** {task.group}")
+            for step in task.steps:
+                lines.append(f"- [ ] {step}")
+            lines.append("")
+
+        lines.append("**Verification:**")
+        for item in phase.verification:
+            lines.append(f"- [ ] {item}")
+        lines.append("")
+
+        if phase.verification_commands:
+            lines.append("**Verification Commands:**")
+            for cmd in phase.verification_commands:
+                lines.append(f"- `{cmd}`")
+            lines.append("")
+
+    lines.append("## Testing Strategy")
+    lines.append("")
+    lines.append(plan.testing_strategy)
+    lines.append("")
+    lines.append("## Risks and Edge Cases")
+    lines.append("")
+    for risk in plan.risks:
+        lines.append(f"- {risk}")
+    lines.append("")
+    lines.append("## Open Questions")
+    lines.append("")
+    lines.append(plan.open_questions)
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def plan_file_path(title: str, date: str) -> Path:
+    """Return the plan file path: .claude/plans/YYYY-MM-DD-<kebab-title>.md."""
+    kebab = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return Path(f".claude/plans/{date}-{kebab}.md")
+
+
 # -- Parsed plan validation --------------------------------------------------
 
 
-def validate_parsed_plan(plan: ParsedPlan) -> list[str]:
+def validate_plan(plan: Plan) -> list[str]:
     """Run cross-item semantic checks that Pydantic cannot express.
 
     Field presence, non-empty strings, and min-length lists are enforced
@@ -231,9 +319,9 @@ def validate_parsed_plan(plan: ParsedPlan) -> list[str]:
 # -- Plan processing ----------------------------------------------------------
 
 
-def _dry_run_parsed_plan() -> ParsedPlan:
-    """Create a plausible dry-run ParsedPlan."""
-    return ParsedPlan(
+def _dry_run_plan() -> Plan:
+    """Create a plausible dry-run Plan."""
+    return Plan(
         title="(dry run plan)",
         overview="(dry run)",
         current_state="(dry run)",
@@ -263,7 +351,7 @@ def _dry_run_parsed_plan() -> ParsedPlan:
 
 def run_plan_processing(
     config: Config, work_dir: Path
-) -> ParsedPlan:
+) -> Plan:
     """Parse the plan file into a structured representation.
 
     Calls Claude with --json-schema to extract the plan structure, then
@@ -292,13 +380,13 @@ def run_plan_processing(
             "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
             f"Plan text:\n\n{plan_text}"
         ),
-        schema=ParsedPlan,
+        schema=Plan,
         effort="low",
         work_dir=work_dir,
         dry_run=config.dry_run,
         streaming=False,
         worktree=config.worktree,
-        dry_run_default=_dry_run_parsed_plan(),
+        dry_run_default=_dry_run_plan(),
     )
 
     display.result_panel("Parsed Plan", parsed)
@@ -306,7 +394,7 @@ def run_plan_processing(
     # Deterministic validation + auto-fix loop
     max_fix_attempts = 3
     for attempt in range(max_fix_attempts):
-        validation_errors = validate_parsed_plan(parsed)
+        validation_errors = validate_plan(parsed)
         if not validation_errors:
             display.info("[green]Plan structure validated.[/green]")
             return parsed
@@ -375,13 +463,13 @@ def run_plan_processing(
                 "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
                 f"Plan text:\n\n{plan_text}"
             ),
-            schema=ParsedPlan,
+            schema=Plan,
             effort="low",
             work_dir=work_dir,
             dry_run=config.dry_run,
             streaming=False,
             worktree=config.worktree,
-            dry_run_default=_dry_run_parsed_plan(),
+            dry_run_default=_dry_run_plan(),
         )
         display.result_panel("Re-parsed Plan", parsed)
 

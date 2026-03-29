@@ -14,15 +14,18 @@ class PreflightStage:
         return ctx.config.skip_implement
 
     def run(self, ctx) -> None:
-        if ctx.parsed_plan is None:
-            ctx.parsed_plan = run_plan_processing(ctx.config, ctx.work_dir)
+        if ctx.plan is not None:
             display.info(
-                f"Pre-flight complete: "
-                f"{len(ctx.parsed_plan.phases)} phases, "
-                f"{sum(len(p.tasks) for p in ctx.parsed_plan.phases)} tasks"
+                f"Pre-flight: using plan from draft stage "
+                f"({len(ctx.plan.phases)} phases)"
             )
         else:
-            display.info(f"Pre-flight: using restored plan ({len(ctx.parsed_plan.phases)} phases)")
+            ctx.plan = run_plan_processing(ctx.config, ctx.work_dir)
+            display.info(
+                f"Pre-flight complete: "
+                f"{len(ctx.plan.phases)} phases, "
+                f"{sum(len(p.tasks) for p in ctx.plan.phases)} tasks"
+            )
 
     def execute(self, ctx) -> None:
         display.stage_bar(self.name)
@@ -38,4 +41,4 @@ class PreflightStage:
     def _snapshot(self, ctx) -> None:
         from ..snapshot import save_snapshot
         if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

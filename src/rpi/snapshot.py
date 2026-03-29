@@ -41,6 +41,8 @@ class SnapshotStageProgress(BaseModel):
     review_fix: SnapshotReviewProgress | None = None
     commit_done: bool = False
     push_or_pr_done: bool = False
+    research_done: bool = False
+    plan_draft_done: bool = False
 
 
 class Snapshot(BaseModel):
@@ -62,9 +64,12 @@ class Snapshot(BaseModel):
     push: bool = False
     worktree: str = ""
     dry_run: bool = False
+    prompt: str = ""
+    skip_research: bool = False
+    research_path: str = ""
 
     # Parsed plan (JSON-serialized)
-    parsed_plan_json: str | None = None
+    plan_json: str | None = None
 
     # Stage progress
     progress: SnapshotStageProgress = Field(default_factory=SnapshotStageProgress)
@@ -80,7 +85,12 @@ def create_snapshot_dir(config: Config) -> Path:
     """Create a timestamped snapshot directory under ~/.claude/snapshots/."""
     snap_base = Path.home() / ".claude" / "snapshots"
     snap_base.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", config.plan_path.stem)
+    if config.plan_path is not None:
+        slug = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", config.plan_path.stem)
+    else:
+        # Derive slug from prompt in prompt mode
+        words = config.prompt.split()[:4]
+        slug = "-".join(words) if words else ""
     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-") or "rpi"
     ts = time.strftime("%Y%m%d-%H%M%S")
     snap_dir = snap_base / f"rpi-{slug}-{ts}"
@@ -92,12 +102,12 @@ def save_snapshot(
     snap_dir: Path,
     config: Config,
     progress: SnapshotStageProgress,
-    parsed_plan: object | None,
+    plan: object | None,
     work_dir: Path,
 ) -> None:
     """Write snapshot.json and copy supporting files.
 
-    parsed_plan is typed as object to avoid importing ParsedPlan here;
+    plan is typed as object to avoid importing Plan here;
     it must be a Pydantic BaseModel with model_dump_json().
     """
     from .plan import _extract_plan_frontmatter
@@ -105,12 +115,12 @@ def save_snapshot(
     copied_files: dict[str, str] = {}
 
     # Copy plan file
-    if config.plan_path.is_file():
+    if config.plan_path is not None and config.plan_path.is_file():
         shutil.copy2(str(config.plan_path), str(snap_dir / "plan.md"))
         copied_files["plan"] = "plan.md"
 
     # Copy research/spec from plan front matter
-    if config.plan_path.is_file():
+    if config.plan_path is not None and config.plan_path.is_file():
         fm = _extract_plan_frontmatter(config.plan_path)
         plan_dir = config.plan_path.parent
         for label in ("research", "spec"):
@@ -137,7 +147,7 @@ def save_snapshot(
     snapshot = Snapshot(
         version=1,
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        plan_path=str(config.plan_path),
+        plan_path=str(config.plan_path) if config.plan_path else "",
         min_score=config.min_score,
         max_review_iters=config.max_review_iters,
         max_fix_iters=config.max_fix_iters,
@@ -150,8 +160,11 @@ def save_snapshot(
         push=config.push,
         worktree=config.worktree,
         dry_run=config.dry_run,
-        parsed_plan_json=(
-            parsed_plan.model_dump_json() if parsed_plan else None
+        prompt=config.prompt,
+        skip_research=config.skip_research,
+        research_path=str(config.research_path) if config.research_path else "",
+        plan_json=(
+            plan.model_dump_json() if plan else None
         ),
         progress=progress,
         copied_files=copied_files,
@@ -173,24 +186,43 @@ def restore_from_snapshot(
 ) -> tuple[Config, object | None, Path, SnapshotStageProgress]:
     """Reconstruct state from a snapshot directory.
 
-    Returns (config, parsed_plan_or_None, work_dir, progress).
-    parsed_plan is returned as a ParsedPlan but typed loosely to keep
+    Returns (config, plan_or_None, work_dir, progress).
+    plan is returned as a Plan but typed loosely to keep
     the import lazy.
     """
-    from .plan import ParsedPlan
+    from .plan import Plan
 
     snapshot = load_snapshot(snap_dir)
 
-    plan_path = Path(snapshot.plan_path)
-    if not plan_path.is_file():
-        # Fall back to the snapshot's copy
+    # Resolve plan_path: in prompt mode (no plan file), skip resolution
+    plan_path: Path | None = None
+    if snapshot.plan_path:
+        # Plan-file mode: resolve the plan path
+        resolved = Path(snapshot.plan_path)
+        if not resolved.is_file():
+            snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
+            if snap_plan.is_file():
+                resolved = snap_plan
+                display.warn(f"Original plan file not found, using snapshot copy: {snap_plan}")
+            else:
+                display.error(f"Plan file not found: {snapshot.plan_path}")
+                sys.exit(1)
+        plan_path = resolved
+    elif snapshot.prompt and snapshot.progress.plan_draft_done:
+        # Prompt mode with plan draft completed: restore plan_path from snapshot
         snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
         if snap_plan.is_file():
             plan_path = snap_plan
-            display.warn(f"Original plan file not found, using snapshot copy: {snap_plan}")
-        else:
-            display.error(f"Plan file not found: {snapshot.plan_path}")
-            sys.exit(1)
+
+    # Restore research_path
+    research_path: Path | None = None
+    if snapshot.research_path:
+        research_path = Path(snapshot.research_path)
+
+    # Set skip flags for completed new stages
+    skip_research = snapshot.skip_research
+    if snapshot.progress.research_done:
+        skip_research = True
 
     config = Config(
         plan_path=plan_path,
@@ -206,11 +238,14 @@ def restore_from_snapshot(
         push=snapshot.push,
         worktree=snapshot.worktree,
         dry_run=snapshot.dry_run,
+        prompt=snapshot.prompt,
+        skip_research=skip_research,
+        research_path=research_path,
     )
 
-    parsed_plan = None
-    if snapshot.parsed_plan_json:
-        parsed_plan = ParsedPlan.model_validate_json(snapshot.parsed_plan_json)
+    plan = None
+    if snapshot.plan_json:
+        plan = Plan.model_validate_json(snapshot.plan_json)
 
     # Restore work_dir: seed a new tempdir from snapshot's work/ contents
     work_dir = Path(tempfile.mkdtemp(prefix="rpi-"))
@@ -224,4 +259,4 @@ def restore_from_snapshot(
             else:
                 shutil.copy2(str(item), str(dest))
 
-    return config, parsed_plan, work_dir, snapshot.progress
+    return config, plan, work_dir, snapshot.progress

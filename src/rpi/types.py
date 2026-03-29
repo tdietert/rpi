@@ -8,7 +8,7 @@ from pathlib import Path
 
 @dataclass
 class Config:
-    plan_path: Path
+    plan_path: Path | None = None
     min_score: int = 8  # threshold on 0-10 scale (ReviewResult.score / 2)
     max_review_iters: int = 5
     max_fix_iters: int = 5
@@ -21,3 +21,6 @@ class Config:
     push: bool = False  # push to current branch after commit (implies skip_pr)
     worktree: str = ""  # if non-empty, absolute path to a pre-created git worktree
     dry_run: bool = False
+    prompt: str = ""
+    skip_research: bool = False
+    research_path: Path | None = None

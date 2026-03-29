@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from ..display import display
-from ..plan import ParsedPlan, PlanMetadata
+from ..plan import Plan, PlanMetadata
+from ..research import Research
 from ..snapshot import SnapshotPhaseProgress, SnapshotStageProgress, save_snapshot
 from ..types import Config
 
@@ -20,8 +21,8 @@ class PipelineContext:
     work_dir: Path
     snap_dir: Path | None
     progress: SnapshotStageProgress
-    meta: PlanMetadata
-    parsed_plan: ParsedPlan | None = None
+    meta: PlanMetadata | None = None
+    plan: Plan | None = None
     review_score: int | None = None
     review_iters: int = 0
     fix_status: str = "skipped"
@@ -31,6 +32,8 @@ class PipelineContext:
     push_ok: bool = False
     pr_result: Any = None  # PrResult
     resume_completed_phases: set[int] = field(default_factory=set)
+    research_path: Path | None = None
+    research: Research | None = None
 
 
 class Stage(ABC):
@@ -54,7 +57,7 @@ class Stage(ABC):
 
     def _snapshot(self, ctx: PipelineContext) -> None:
         if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)
 
 
 def print_summary(ctx: PipelineContext) -> None:
@@ -70,20 +73,37 @@ def print_summary(ctx: PipelineContext) -> None:
 
     rows: list[tuple[str, str, str]] = []
 
-    # Plan review
-    if config.skip_implement or config.skip_plan_review:
-        rows.append(("Plan Review", "", skip_label()))
-    else:
-        ok = ctx.review_score is not None and ctx.review_score >= config.min_score
-        detail = f"score {ctx.review_score}/10, {ctx.review_iters} iter"
-        rows.append(("Plan Review", icon(ok), detail))
+    # Research
+    if ctx.config.skip_research or ctx.config.plan_path is not None:
+        rows.append(("Research", "", skip_label()))
+    elif ctx.progress.research_done:
+        rows.append(("Research", icon(True), "done"))
+    elif not ctx.config.skip_research:
+        rows.append(("Research", "", "in progress"))
 
-    # Implementation
-    if config.skip_implement:
-        rows.append(("Implement", "", skip_label()))
-    else:
-        n_phases = len(ctx.parsed_plan.phases) if ctx.parsed_plan else 0
-        rows.append(("Implement", icon(True), f"{n_phases} phases"))
+    # Plan Draft
+    if ctx.config.plan_path is not None and not ctx.progress.plan_draft_done:
+        rows.append(("Plan Draft", "", skip_label()))
+    elif ctx.progress.plan_draft_done:
+        rows.append(("Plan Draft", icon(True), "done"))
+    elif ctx.config.plan_path is None:
+        rows.append(("Plan Draft", "", "in progress"))
+
+    if meta is not None:
+        # Plan review
+        if config.skip_implement or config.skip_plan_review:
+            rows.append(("Plan Review", "", skip_label()))
+        else:
+            ok = ctx.review_score is not None and ctx.review_score >= config.min_score
+            detail = f"score {ctx.review_score}/10, {ctx.review_iters} iter"
+            rows.append(("Plan Review", icon(ok), detail))
+
+        # Implementation
+        if config.skip_implement:
+            rows.append(("Implement", "", skip_label()))
+        else:
+            n_phases = len(ctx.plan.phases) if ctx.plan else 0
+            rows.append(("Implement", icon(True), f"{n_phases} phases"))
 
     # Review-fix
     if config.skip_fix:
@@ -121,11 +141,13 @@ def print_summary(ctx: PipelineContext) -> None:
     if config.worktree:
         footer["Worktree"] = config.worktree
 
-    display.summary_table(f"Summary  {meta.title}", rows, footer or None)
+    display.summary_table(f"Summary  {meta.title if meta else 'RPI Run'}", rows, footer or None)
 
 
 # Re-export stage classes for convenience
+from .plan_draft import PlanDraftStage
 from .preflight import PreflightStage
+from .research import ResearchStage
 from .plan_review import PlanReviewStage
 from .implement import ImplementStage
 from .review_fix import ReviewFixStage
@@ -136,6 +158,8 @@ __all__ = [
     "PipelineContext",
     "Stage",
     "print_summary",
+    "ResearchStage",
+    "PlanDraftStage",
     "PreflightStage",
     "PlanReviewStage",
     "ImplementStage",

@@ -121,16 +121,16 @@ class ImplementStage:
     def run(self, ctx) -> None:
         config = ctx.config
         work_dir = ctx.work_dir
-        parsed_plan = ctx.parsed_plan
+        plan = ctx.plan
         skip_phases = ctx.resume_completed_phases or None
-        num_phases = len(parsed_plan.phases)
+        num_phases = len(plan.phases)
         path = config.plan_path
 
         display.stage_header(f"Stage 2: Implementation ({num_phases} phases)")
         if ctx.progress.implementation is None:
             ctx.progress.implementation = SnapshotPhaseProgress()
 
-        for phase in parsed_plan.phases:
+        for phase in plan.phases:
             phase_num = phase.number
 
             if skip_phases and phase_num in skip_phases:
@@ -263,4 +263,4 @@ class ImplementStage:
 
     def _snapshot(self, ctx) -> None:
         if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)
