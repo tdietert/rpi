@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from ..diagnosis import (
+    TriageFixRecord,
     print_implementation_diagnosis,
     run_implementation_diagnosis,
+    run_verification_fix,
     triage_verification_failure,
 )
 from ..display import display
@@ -32,14 +33,6 @@ class PhaseResult(BaseModel):
     )
     errors: str = Field(description="Any errors encountered, or 'None'")
     verification: str = Field(description="Result of verification steps")
-
-
-@dataclass
-class _PhaseAttemptRecord:
-    """Records a single implementation attempt for diagnosis."""
-    attempt: int
-    result: PhaseResult
-    verification_error: str
 
 
 # -- Dry-run default ----------------------------------------------------------
@@ -85,12 +78,10 @@ def _run_verification_commands(
     return (True, "")
 
 
-def _format_phase_prompt(
-    phase: PlanPhase, plan_path: Path, error_context: str = ""
-) -> str:
+def _format_phase_prompt(phase: PlanPhase, plan_path: Path) -> str:
     """Build the implementation prompt for a single phase."""
     phase_json = phase.model_dump_json(indent=2)
-    parts = [
+    return "\n".join([
         f"Run /rpi-implement. Implement ONLY Phase {phase.number}: {phase.name}.",
         "",
         "## Structured Phase Data",
@@ -101,11 +92,7 @@ def _format_phase_prompt(
         "(overview, current state, risks, edge cases).",
         "",
         f"```json\n{phase_json}\n```",
-    ]
-    if error_context:
-        parts.append("")
-        parts.append(f"Previous attempt failed with: {error_context}")
-    return "\n".join(parts)
+    ])
 
 
 # -- Stage class --------------------------------------------------------------
@@ -145,102 +132,142 @@ class ImplementStage:
                 f"Groups: {', '.join(sorted({t.group for t in phase.tasks}))}"
             )
 
+            # -- Implementation (runs exactly once) --
+            result = run_claude_structured(
+                prompt=_format_phase_prompt(phase, path),
+                schema=PhaseResult,
+                effort="medium",
+                work_dir=work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                dry_run_default=_dry_run_phase_result(),
+            )
+            display.result_panel(f"Phase {phase_num} Implementation", result)
+
             has_verification = bool(phase.verification_commands)
-            max_attempts = 3 if has_verification else 2
-            error_context = ""
-            phase_attempts: list[_PhaseAttemptRecord] = []
 
-            for attempt in range(1, max_attempts + 1):
-                result = run_claude_structured(
-                    prompt=_format_phase_prompt(phase, path, error_context=error_context),
-                    schema=PhaseResult,
-                    effort="medium",
-                    work_dir=work_dir,
-                    dry_run=config.dry_run,
-                    worktree=config.worktree,
-                    dry_run_default=_dry_run_phase_result(),
+            if not has_verification:
+                if result.status == "failed":
+                    display.error(f"Phase {phase_num} failed: {result.errors}")
+                    if not confirm("  Continue to next phase? (y/n): "):
+                        display.error(f"Stopped at phase {phase_num}.")
+                        sys.exit(1)
+            else:
+                # -- Verification --
+                n_cmds = len(phase.verification_commands)
+                display.info(f"Verification: running {n_cmds} command{'s' if n_cmds != 1 else ''}...")
+                v_ok, v_msg = _run_verification_commands(
+                    phase.verification_commands, worktree=config.worktree
                 )
-                display.result_panel(f"Phase {phase_num} Attempt {attempt}/{max_attempts}", result)
 
-                if has_verification:
-                    # Verification-gated path: run commands regardless of self-report
-                    n_cmds = len(phase.verification_commands)
-                    display.info(f"Verification: running {n_cmds} command{'s' if n_cmds != 1 else ''}...")
-                    v_ok, v_msg = _run_verification_commands(
-                        phase.verification_commands, worktree=config.worktree
-                    )
-                    if v_ok:
-                        display.info("[green]Verification: passed[/green]")
-                        break
-                    # Verification failed — record the attempt
-                    failed_cmd = v_msg.split("\n")[0]  # "Command failed: ..."
+                if not v_ok:
+                    failed_cmd = v_msg.split("\n")[0]
                     display.error(f"Verification: FAILED \u2014 {failed_cmd}")
 
-                    # Triage: is the command itself broken?
-                    if attempt == 1:
+                    # -- Triage-fix loop --
+                    max_fix_attempts = 3
+                    fix_records: list[TriageFixRecord] = []
+                    for fix_attempt in range(max_fix_attempts):
                         raw_failed = v_msg.split("\n")[0].removeprefix("Command failed: ").strip()
-                        display.info("Triaging verification failure...")
+                        display.info(f"Triaging verification failure (attempt {fix_attempt + 1}/{max_fix_attempts})...")
                         triage = triage_verification_failure(
                             failed_command=raw_failed,
                             error_output=v_msg,
                             phase=phase,
+                            all_commands=phase.verification_commands,
+                            work_dir=work_dir,
+                            dry_run=config.dry_run,
+                            worktree=config.worktree,
+                            implementer_verification=result.verification,
+                        )
+                        if triage is None:
+                            display.error("Triage failed to produce a result.")
+                            break
+
+                        display.info(f"Triage verdict: {triage.verdict} \u2014 {triage.reasoning}")
+
+                        # Build record (verification_error updated after action)
+                        record = TriageFixRecord(
+                            attempt=fix_attempt + 1,
+                            verdict=triage.verdict,
+                            reasoning=triage.reasoning,
+                            corrected_command=triage.corrected_command,
+                            fix_instructions=triage.fix_instructions,
+                            verification_error=v_msg,
+                        )
+
+                        match triage.verdict:
+                            case "command_wrong":
+                                if not triage.corrected_commands and not triage.corrected_command:
+                                    display.error("Triage said command is wrong but gave no correction.")
+                                    fix_records.append(record)
+                                    break
+                                if triage.corrected_commands:
+                                    display.info(f"Replacing verification commands ({len(triage.corrected_commands)} total)")
+                                    phase.verification_commands = triage.corrected_commands
+                                else:
+                                    display.info(f"Correcting: `{raw_failed}` \u2192 `{triage.corrected_command}`")
+                                    phase.verification_commands = [
+                                        triage.corrected_command if c == raw_failed else c
+                                        for c in phase.verification_commands
+                                    ]
+                                v_ok, v_msg = _run_verification_commands(
+                                    phase.verification_commands, worktree=config.worktree
+                                )
+                                record.verification_error = v_msg
+                                fix_records.append(record)
+                                if v_ok:
+                                    display.info("[green]Verification: passed (after command correction)[/green]")
+                                    break
+
+                            case "code_fix":
+                                if not triage.fix_instructions:
+                                    display.error("Triage said code_fix but gave no instructions.")
+                                    fix_records.append(record)
+                                    break
+                                display.info("Spawning fixer agent...")
+                                fix_result = run_verification_fix(
+                                    fix_instructions=triage.fix_instructions,
+                                    failed_command=raw_failed,
+                                    error_output=v_msg,
+                                    phase=phase,
+                                    work_dir=work_dir,
+                                    dry_run=config.dry_run,
+                                    worktree=config.worktree,
+                                )
+                                if fix_result:
+                                    display.info(f"Fixer: {fix_result.summary}")
+                                    record.fix_summary = fix_result.summary
+                                v_ok, v_msg = _run_verification_commands(
+                                    phase.verification_commands, worktree=config.worktree
+                                )
+                                record.verification_error = v_msg
+                                fix_records.append(record)
+                                if v_ok:
+                                    display.info("[green]Verification: passed (after code fix)[/green]")
+                                    break
+
+                            case "fundamental":
+                                display.error(f"Fundamental issue: {triage.reasoning}")
+                                fix_records.append(record)
+                                break
+
+                    if not v_ok:
+                        display.info("Running verification failure diagnosis...")
+                        diagnosis = run_implementation_diagnosis(
+                            phase=phase,
+                            fix_attempts=fix_records,
+                            implementer_verification=result.verification,
                             work_dir=work_dir,
                             dry_run=config.dry_run,
                             worktree=config.worktree,
                         )
-                        if triage and triage.command_is_wrong and triage.corrected_command:
-                            display.warn(f"Triage: command is wrong \u2014 {triage.reasoning}")
-                            display.info(f"Correcting: `{raw_failed}` \u2192 `{triage.corrected_command}`")
-                            # Update the phase's verification commands in memory
-                            phase.verification_commands = [
-                                triage.corrected_command if c == raw_failed else c
-                                for c in phase.verification_commands
-                            ]
-                            # Re-run verification with corrected command
-                            display.info("Re-running verification with corrected command...")
-                            v_ok, v_msg = _run_verification_commands(
-                                phase.verification_commands, worktree=config.worktree
-                            )
-                            if v_ok:
-                                display.info("[green]Verification: passed (after command correction)[/green]")
-                                break
-                            display.warn("Verification: still failing after correction")
-                        elif triage:
-                            display.info(f"Triage: command is fine \u2014 {triage.reasoning}")
-
-                    error_context = v_msg
-                    if result.status == "failed":
-                        error_context = f"Implementer error: {result.errors}\n\nVerification error: {v_msg}"
-                    phase_attempts.append(_PhaseAttemptRecord(
-                        attempt=attempt, result=result, verification_error=v_msg,
-                    ))
-                    if attempt < max_attempts:
-                        display.info(f"Retrying phase ({attempt}/{max_attempts} attempts used)...")
-                        continue
-                    # Exhausted retries — run diagnosis before prompting
-                    display.info("Running verification failure diagnosis...")
-                    diagnosis = run_implementation_diagnosis(
-                        phase=phase,
-                        attempts=phase_attempts,
-                        plan_path=path,
-                        work_dir=work_dir,
-                        dry_run=config.dry_run,
-                        worktree=config.worktree,
-                    )
-                    print_implementation_diagnosis(diagnosis, phase_num)
-                    if confirm("  Verification failed after all retries. Continue to next phase? (y/n): "):
-                        break
-                    display.error(f"Stopped at phase {phase_num}.")
-                    sys.exit(1)
+                        print_implementation_diagnosis(diagnosis, phase_num)
+                        if not confirm("  Verification failed after triage-fix loop. Continue to next phase? (y/n): "):
+                            display.error(f"Stopped at phase {phase_num}.")
+                            sys.exit(1)
                 else:
-                    # No verification commands: fall back to existing behavior
-                    if result.status == "failed":
-                        if attempt < max_attempts and confirm("  Retry this phase? (y/n): "):
-                            error_context = result.errors
-                            continue
-                        display.error(f"Stopped at phase {phase_num}.")
-                        sys.exit(1)
-                    break
+                    display.info("[green]Verification: passed[/green]")
 
             display.info(f"[green]Phase {phase_num}/{num_phases} complete:[/green] {result.summary}")
             # Phase complete callback

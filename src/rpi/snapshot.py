@@ -224,6 +224,15 @@ def restore_from_snapshot(
     if snapshot.progress.research_done:
         skip_research = True
 
+    # Verify worktree still exists on disk
+    if snapshot.worktree and not Path(snapshot.worktree).is_dir():
+        display.error(
+            f"Worktree from snapshot no longer exists: {snapshot.worktree}\n"
+            "  It may have been cleaned up since the snapshot was saved.\n"
+            "  Re-run without --resume, or use --worktree to create a new one."
+        )
+        sys.exit(1)
+
     config = Config(
         plan_path=plan_path,
         min_score=snapshot.min_score,
