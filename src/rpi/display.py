@@ -10,7 +10,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-
 # Pipeline stages for the stage tracker bar
 _STAGES = [
     ("research", "Research"),
@@ -126,7 +125,7 @@ class Display:
                 else:
                     text.append(f"{pad}  ", style="")
                     text.append(f"{display_name}:", style="cyan")
-                    text.append(f" ")
+                    text.append(" ")
                     text.append(value, style=style)
                     text.append("\n")
             else:
@@ -207,7 +206,7 @@ class Display:
         """Print an error to stderr."""
         self.console.print(f"  [red]{msg}[/red]")
 
-    def spinner_context(self, message: str) -> "Console.status":
+    def spinner_context(self, message: str) -> Console.status:
         """Return a console.status() context manager for spinners."""
         return self.console.status(f"  {message}", spinner="dots")
 

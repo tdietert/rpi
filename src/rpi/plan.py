@@ -14,8 +14,6 @@ from .process import run_claude_structured
 from .types import Config
 
 
-
-
 class PlanTask(BaseModel):
     id: str = Field(min_length=1, description="Task identifier, e.g. '1.1', '2.3'")
     name: str = Field(min_length=1, description="Short descriptive name of the task")
@@ -133,13 +131,13 @@ def validate_plan_file(path: Path) -> list[str]:
             subdir = parts[claude_idx + 1]
             if subdir == "specs":
                 errors.append(
-                    f"This file is in .claude/specs/ — it's a spec, not a plan. "
-                    f"Run '/plan' on it first to produce an implementation plan."
+                    "This file is in .claude/specs/ — it's a spec, not a plan. "
+                    "Run '/plan' on it first to produce an implementation plan."
                 )
             elif subdir == "research":
                 errors.append(
-                    f"This file is in .claude/research/ — it's a research doc, not a plan. "
-                    f"Run '/spec' then '/plan' to produce an implementation plan."
+                    "This file is in .claude/research/ — it's a research doc, not a plan. "
+                    "Run '/spec' then '/plan' to produce an implementation plan."
                 )
 
     # Check 2: Frontmatter has 'feature:' (spec) instead of 'task:' (plan)
@@ -153,8 +151,6 @@ def validate_plan_file(path: Path) -> list[str]:
     has_phases = bool(re.search(r"^##+ Phase \d", text, re.MULTILINE))
     has_tasks = bool(re.search(r"^###+ Task \d+\.\d+", text, re.MULTILINE))
     has_groups = "**Group:**" in text
-    has_verification_cmds = "**Verification Commands:**" in text
-
     if not has_phases:
         errors.append(
             "No '## Phase N' headings found. Plan files must have implementation phases."

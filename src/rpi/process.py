@@ -16,8 +16,8 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from .display import display
-from .types import Config
 from .snapshot import SnapshotStageProgress
+from .types import Config
 
 T = TypeVar("T", bound=BaseModel)
 

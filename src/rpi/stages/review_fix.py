@@ -16,7 +16,6 @@ from ..review import (
     run_review_quorum,
 )
 from ..snapshot import SnapshotReviewProgress
-
 from . import Stage
 
 

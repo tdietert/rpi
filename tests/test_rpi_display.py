@@ -8,14 +8,12 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
-from rpi.display import Display, _STAGES
+from rpi.display import _STAGES, Display
 from rpi.plan import PlanPhase, PlanTask
 from rpi.process import _child_procs, _interrupt, _sigint_handler, cleanup_children
 from rpi.review import ReviewIssue, ReviewResult
 from rpi.stages.commit import CommitResult
 from rpi.stages.implement import PhaseResult
-
-
 
 
 @pytest.fixture

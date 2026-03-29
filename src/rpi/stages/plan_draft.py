@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from . import Stage
 from ..display import display
 from ..feedback import collect_feedback
 from ..plan import (
@@ -18,6 +17,7 @@ from ..plan import (
     validate_plan,
 )
 from ..process import run_claude_structured
+from . import Stage
 
 
 def _dry_run_plan() -> Plan:

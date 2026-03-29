@@ -25,8 +25,6 @@ from .process import (
 )
 
 
-
-
 class ReviewIssue(BaseModel):
     severity: Literal["critical", "note"]
     description: str = Field(

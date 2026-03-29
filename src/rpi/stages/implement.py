@@ -20,10 +20,7 @@ from ..display import display
 from ..plan import PlanPhase
 from ..process import confirm, run_claude_structured
 from ..snapshot import SnapshotPhaseProgress
-
 from . import Stage
-
-
 
 
 class PhaseResult(BaseModel):

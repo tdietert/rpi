@@ -10,7 +10,7 @@ from typing import Any
 from ..display import display
 from ..plan import Plan, PlanMetadata
 from ..research import Research
-from ..snapshot import SnapshotPhaseProgress, SnapshotStageProgress, save_snapshot
+from ..snapshot import SnapshotStageProgress, save_snapshot
 from ..types import Config
 
 
@@ -145,25 +145,25 @@ def print_summary(ctx: PipelineContext) -> None:
 
 
 # Re-export stage classes for convenience
-from .plan_draft import PlanDraftStage
-from .preflight import PreflightStage
-from .research import ResearchStage
-from .plan_review import PlanReviewStage
-from .implement import ImplementStage
-from .review_fix import ReviewFixStage
 from .commit import CommitStage
+from .implement import ImplementStage
+from .plan_draft import PlanDraftStage
+from .plan_review import PlanReviewStage
+from .preflight import PreflightStage
 from .push_pr import PushPrStage
+from .research import ResearchStage
+from .review_fix import ReviewFixStage
 
 __all__ = [
+    "CommitStage",
+    "ImplementStage",
     "PipelineContext",
+    "PlanDraftStage",
+    "PlanReviewStage",
+    "PreflightStage",
+    "PushPrStage",
+    "ResearchStage",
+    "ReviewFixStage",
     "Stage",
     "print_summary",
-    "ResearchStage",
-    "PlanDraftStage",
-    "PreflightStage",
-    "PlanReviewStage",
-    "ImplementStage",
-    "ReviewFixStage",
-    "CommitStage",
-    "PushPrStage",
 ]

@@ -29,8 +29,6 @@ from .display import display
 from .plan import PlanMetadata, parse_plan_metadata, validate_plan_file
 from .process import _run_state, _sigint_handler, cleanup_children
 from .snapshot import (
-    SnapshotPhaseProgress,
-    SnapshotReviewProgress,
     SnapshotStageProgress,
     create_snapshot_dir,
     load_snapshot,

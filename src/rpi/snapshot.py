@@ -16,8 +16,6 @@ from .display import display
 from .types import Config
 
 
-
-
 class SnapshotPhaseProgress(BaseModel):
     """Tracks which implementation phases have completed."""
     completed_phases: list[int] = Field(default_factory=list)

@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from . import Stage
 from ..display import display
 from ..feedback import collect_feedback
 from ..process import run_claude_structured
 from ..research import Research, research_file_path, serialize_to_markdown
+from . import Stage
 
 
 def _dry_run_research(prompt: str) -> Research:

@@ -13,8 +13,6 @@ from .process import run_claude_structured
 from .review import IterationRecord, _format_iteration_history
 
 
-
-
 class DiagnosisResult(BaseModel):
     pattern: Literal[
         "circular",

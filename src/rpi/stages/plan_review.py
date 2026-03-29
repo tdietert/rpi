@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sys
 
-from ..display import display
 from ..diagnosis import print_diagnosis, run_diagnosis
+from ..display import display
 from ..plan import run_plan_processing
 from ..process import confirm
 from ..review import (
@@ -17,7 +17,6 @@ from ..review import (
     run_review_quorum,
 )
 from ..snapshot import SnapshotReviewProgress
-
 from . import Stage
 
 
