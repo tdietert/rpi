@@ -16,7 +16,6 @@ from rpi.stages.commit import CommitResult
 from rpi.stages.implement import PhaseResult
 
 
-# -- Fixtures ------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -94,7 +93,6 @@ def sample_plan_phase():
     )
 
 
-# -- Display.truncate() tests -------------------------------------------------
 
 
 class TestTruncate:
@@ -119,7 +117,6 @@ class TestTruncate:
         assert display.truncate("", max_width=50) == ""
 
 
-# -- Display._status_style() tests --------------------------------------------
 
 
 class TestStatusStyle:
@@ -143,7 +140,6 @@ class TestStatusStyle:
         assert Display._status_style("unknown_status") == ""
 
 
-# -- Display._model_summary_rich() tests --------------------------------------
 
 
 class TestModelSummaryRich:
@@ -182,7 +178,6 @@ class TestModelSummaryRich:
         assert result == ""
 
 
-# -- Display.result_panel() rendering tests ------------------------------------
 
 
 class TestResultPanel:
@@ -221,7 +216,6 @@ class TestResultPanel:
         # No exception means success
 
 
-# -- Display.summary_table() rendering tests -----------------------------------
 
 
 class TestSummaryTable:
@@ -262,7 +256,6 @@ class TestSummaryTable:
         assert "/tmp/wt" in output
 
 
-# -- Display.stage_bar() rendering tests ---------------------------------------
 
 
 class TestStageBar:
@@ -289,7 +282,6 @@ class TestStageBar:
             assert label in output
 
 
-# -- Ctrl+C / interrupt event tests -------------------------------------------
 
 
 class TestInterrupt:
@@ -330,7 +322,6 @@ class TestInterrupt:
         _interrupt.clear()  # cleanup
 
 
-# -- Display.banner() rendering test -------------------------------------------
 
 
 class TestBanner:

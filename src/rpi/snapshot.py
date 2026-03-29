@@ -16,7 +16,6 @@ from .display import display
 from .types import Config
 
 
-# -- Snapshot types -----------------------------------------------------------
 
 
 class SnapshotPhaseProgress(BaseModel):
@@ -78,7 +77,6 @@ class Snapshot(BaseModel):
     copied_files: dict[str, str] = Field(default_factory=dict)
 
 
-# -- Snapshot utilities -------------------------------------------------------
 
 
 def create_snapshot_dir(config: Config) -> Path:

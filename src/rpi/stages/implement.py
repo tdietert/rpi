@@ -24,7 +24,6 @@ from ..snapshot import SnapshotPhaseProgress
 from . import Stage
 
 
-# -- Types local to implement stage -------------------------------------------
 
 
 class PhaseResult(BaseModel):
@@ -37,7 +36,6 @@ class PhaseResult(BaseModel):
     verification: str = Field(description="Result of verification steps")
 
 
-# -- Dry-run default ----------------------------------------------------------
 
 
 def _dry_run_phase_result() -> PhaseResult:
@@ -50,7 +48,6 @@ def _dry_run_phase_result() -> PhaseResult:
     )
 
 
-# -- Helpers ------------------------------------------------------------------
 
 
 def _run_verification_commands(
@@ -97,7 +94,6 @@ def _format_phase_prompt(phase: PlanPhase, plan_path: Path) -> str:
     ])
 
 
-# -- Stage class --------------------------------------------------------------
 
 
 class ImplementStage(Stage):

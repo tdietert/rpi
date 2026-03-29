@@ -14,7 +14,6 @@ from .process import run_claude_structured
 from .types import Config
 
 
-# -- Plan types ---------------------------------------------------------------
 
 
 class PlanTask(BaseModel):
@@ -72,7 +71,6 @@ class ApplyFeedbackResult(BaseModel):
     )
 
 
-# -- Plan frontmatter parsing ------------------------------------------------
 
 
 def _extract_plan_frontmatter(plan_path: Path) -> dict[str, str]:
@@ -100,7 +98,6 @@ def _extract_plan_frontmatter(plan_path: Path) -> dict[str, str]:
     return result
 
 
-# -- Plan metadata -----------------------------------------------------------
 
 
 def parse_plan_metadata(path: Path) -> PlanMetadata:
@@ -115,7 +112,6 @@ def parse_plan_metadata(path: Path) -> PlanMetadata:
     )
 
 
-# -- Plan file validation ----------------------------------------------------
 
 
 def validate_plan_file(path: Path) -> list[str]:
@@ -182,7 +178,6 @@ def validate_plan_file(path: Path) -> list[str]:
     return errors
 
 
-# -- Plan serialization ------------------------------------------------------
 
 
 def serialize_plan_to_markdown(
@@ -270,7 +265,6 @@ def plan_file_path(title: str, date: str) -> Path:
     return Path(f".claude/plans/{date}-{kebab}.md")
 
 
-# -- Parsed plan validation --------------------------------------------------
 
 
 def validate_plan(plan: Plan) -> list[str]:
@@ -316,7 +310,6 @@ def validate_plan(plan: Plan) -> list[str]:
     return errors
 
 
-# -- Plan processing ----------------------------------------------------------
 
 
 def _dry_run_plan() -> Plan:

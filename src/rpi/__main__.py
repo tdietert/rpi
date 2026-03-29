@@ -205,7 +205,6 @@ def _run() -> None:
     )
     args = parser.parse_args()
 
-    # -- Handle --list-snapshots early -----------------------------------------
     if args.list_snapshots:
         snap_base = Path.home() / ".claude" / "snapshots"
         if not snap_base.is_dir():
@@ -249,7 +248,6 @@ def _run() -> None:
         display.stdout.print(table)
         sys.exit(0)
 
-    # -- Resume or fresh run ---------------------------------------------------
     resume_completed_phases: set[int] = set()
     snap_dir: Path | None = None
     progress = SnapshotStageProgress()
@@ -524,7 +522,6 @@ def _run() -> None:
         fields.append(("Work", str(work_dir)))
         display.banner("Review-Implement-Fix", "", fields)
 
-    # -- Build pipeline context and run stages ---------------------------------
     ctx = PipelineContext(
         config=config,
         work_dir=work_dir,

@@ -13,7 +13,6 @@ from .process import run_claude_structured
 from .review import IterationRecord, _format_iteration_history
 
 
-# -- Diagnosis types ----------------------------------------------------------
 
 
 class DiagnosisResult(BaseModel):
@@ -101,7 +100,6 @@ class VerificationFixResult(BaseModel):
     summary: str = Field(description="What was changed and why")
 
 
-# -- Dry-run defaults ---------------------------------------------------------
 
 
 def _dry_run_diagnosis() -> DiagnosisResult:
@@ -138,7 +136,6 @@ def _dry_run_fix() -> VerificationFixResult:
     )
 
 
-# -- Convergence diagnosis ----------------------------------------------------
 
 
 def run_diagnosis(
@@ -231,7 +228,6 @@ def print_diagnosis(diagnosis: DiagnosisResult | None, loop_type: str) -> None:
     display.info(f"Diagnosis written to: {path}")
 
 
-# -- Implementation phase diagnosis -------------------------------------------
 
 
 def triage_verification_failure(

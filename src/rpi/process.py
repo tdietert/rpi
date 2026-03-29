@@ -21,7 +21,6 @@ from .snapshot import SnapshotStageProgress
 
 T = TypeVar("T", bound=BaseModel)
 
-# -- Global state for child process tracking and interrupt handling -----------
 
 _child_procs: list[subprocess.Popen] = []
 _interrupt = threading.Event()
@@ -56,7 +55,6 @@ def cleanup_children() -> None:
             pass
 
 
-# -- Event parsing -----------------------------------------------------------
 
 
 def _extract_event_text(event: dict) -> str | None:
@@ -85,7 +83,6 @@ def _progress_line(
     return f"  Reviewing... [{' '.join(parts)}] {elapsed}s"
 
 
-# -- Claude CLI subprocess wrapper -------------------------------------------
 
 
 def _run_claude_json(

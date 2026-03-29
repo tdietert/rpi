@@ -25,7 +25,6 @@ from .process import (
 )
 
 
-# -- Review types -------------------------------------------------------------
 
 
 class ReviewIssue(BaseModel):
@@ -63,7 +62,6 @@ class IterationRecord:
     apply_summary: str  # empty if no feedback was applied
 
 
-# -- Dry-run defaults ---------------------------------------------------------
 
 
 def _dry_run_review() -> ReviewResult:
@@ -78,7 +76,6 @@ def _dry_run_review() -> ReviewResult:
     )
 
 
-# -- Verdict ------------------------------------------------------------------
 
 
 def _derive_verdict(result: ReviewResult) -> str:
@@ -88,7 +85,6 @@ def _derive_verdict(result: ReviewResult) -> str:
     return "Ready"
 
 
-# -- Quorum review ------------------------------------------------------------
 
 
 def run_review_quorum(
@@ -305,7 +301,6 @@ def run_review_quorum(
     return QuorumResult(aggregated=aggregated, per_reviewer=results)
 
 
-# -- Feedback application -----------------------------------------------------
 
 
 from .plan import ApplyFeedbackResult
@@ -460,7 +455,6 @@ def _has_feedback(per_reviewer: list[ReviewResult]) -> bool:
     return any(r.issues or r.suggested_changes for r in per_reviewer)
 
 
-# -- Iteration history --------------------------------------------------------
 
 
 def _write_iteration_history(
