@@ -68,4 +68,4 @@ class CommitStage:
 
     def _snapshot(self, ctx) -> None:
         if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

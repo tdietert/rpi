@@ -13,6 +13,8 @@ from rich.text import Text
 
 # Pipeline stages for the stage tracker bar
 _STAGES = [
+    ("research", "Research"),
+    ("plan_draft", "Plan Draft"),
     ("preflight", "Pre-flight"),
     ("plan_review", "Plan Review"),
     ("implement", "Implement"),

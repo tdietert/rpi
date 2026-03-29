@@ -150,10 +150,10 @@ class PlanReviewStage:
 
         # Re-parse after review -- review may have modified the plan structure
         display.info("Re-parsing plan after review modifications...")
-        ctx.parsed_plan = run_plan_processing(config, work_dir)
+        ctx.plan = run_plan_processing(config, work_dir)
         display.info(
-            f"Re-parsed: {len(ctx.parsed_plan.phases)} phases, "
-            f"{sum(len(p.tasks) for p in ctx.parsed_plan.phases)} tasks"
+            f"Re-parsed: {len(ctx.plan.phases)} phases, "
+            f"{sum(len(p.tasks) for p in ctx.plan.phases)} tasks"
         )
         self._snapshot(ctx)
 
@@ -166,4 +166,4 @@ class PlanReviewStage:
 
     def _snapshot(self, ctx) -> None:
         if ctx.snap_dir is not None:
-            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.parsed_plan, ctx.work_dir)
+            save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)

@@ -33,7 +33,7 @@ class _RunState:
     snap_dir: Path | None = None
     config: Config | None = None
     progress: SnapshotStageProgress | None = None
-    parsed_plan: object = None  # ParsedPlan, kept as object to avoid circular import
+    plan: object = None  # Plan, kept as object to avoid circular import
     work_dir: Path | None = None
 
 

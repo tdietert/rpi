@@ -26,7 +26,7 @@ from pathlib import Path
 from rich.table import Table
 
 from .display import display
-from .plan import parse_plan_metadata, validate_plan_file
+from .plan import PlanMetadata, parse_plan_metadata, validate_plan_file
 from .process import _run_state, _sigint_handler, cleanup_children
 from .snapshot import (
     SnapshotPhaseProgress,
@@ -41,9 +41,11 @@ from .stages import (
     CommitStage,
     ImplementStage,
     PipelineContext,
+    PlanDraftStage,
     PlanReviewStage,
     PreflightStage,
     PushPrStage,
+    ResearchStage,
     ReviewFixStage,
     print_summary,
 )
@@ -63,7 +65,7 @@ def _try_save_exit_snapshot(label: str) -> None:
                 _run_state.snap_dir,
                 _run_state.config,
                 _run_state.progress,
-                _run_state.parsed_plan,
+                _run_state.plan,
                 _run_state.work_dir,
             )
             display.console.print(f"\n  {label} Snapshot saved to: {_run_state.snap_dir}")
@@ -183,6 +185,24 @@ def _run() -> None:
         default=False,
         help="List available snapshots and exit",
     )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help="Task description — starts from research stage instead of requiring a plan file",
+    )
+    parser.add_argument(
+        "--research",
+        type=Path,
+        default=None,
+        help="Existing research file — skips research stage",
+    )
+    parser.add_argument(
+        "--skip-research",
+        action="store_true",
+        default=False,
+        help="Skip the research stage (go straight to plan draft)",
+    )
     args = parser.parse_args()
 
     # -- Handle --list-snapshots early -----------------------------------------
@@ -205,6 +225,10 @@ def _run() -> None:
                 snap = load_snapshot(snap_path.parent)
                 p = snap.progress
                 stages = []
+                if p.research_done:
+                    stages.append("research")
+                if p.plan_draft_done:
+                    stages.append("plan-draft")
                 if p.plan_review_done:
                     stages.append("review")
                 if p.implementation_done:
@@ -218,7 +242,7 @@ def _run() -> None:
                 if p.push_or_pr_done:
                     stages.append("pr")
                 progress_str = ", ".join(stages) if stages else "(none)"
-                title = Path(snap.plan_path).stem[:38]
+                title = Path(snap.plan_path).stem[:38] if snap.plan_path else (snap.prompt[:38] if snap.prompt else snap_path.parent.name)
                 table.add_row(title, snap.timestamp, progress_str, str(snap_path.parent))
             except Exception as e:
                 table.add_row(snap_path.parent.name, "", f"(error: {e})", "")
@@ -229,17 +253,19 @@ def _run() -> None:
     resume_completed_phases: set[int] = set()
     snap_dir: Path | None = None
     progress = SnapshotStageProgress()
-    parsed_plan = None
+    plan = None
 
     if args.resume:
         # Resume from snapshot
-        config, parsed_plan_restored, work_dir, progress = restore_from_snapshot(
+        config, plan_restored, work_dir, progress = restore_from_snapshot(
             args.resume.resolve()
         )
         snap_dir = args.resume.resolve()
-        parsed_plan = parsed_plan_restored
+        plan = plan_restored
 
         # Set skip flags for completed stages
+        if progress.research_done:
+            config.skip_research = True
         if progress.plan_review_done:
             config.skip_plan_review = True
         if progress.implementation_done:
@@ -255,25 +281,38 @@ def _run() -> None:
         if progress.implementation and not progress.implementation_done:
             resume_completed_phases = set(progress.implementation.completed_phases)
 
-        meta = parse_plan_metadata(config.plan_path)
+        if config.plan_path:
+            meta = parse_plan_metadata(config.plan_path)
+        elif progress.plan_draft_done:
+            # Prompt-mode with plan draft completed but plan_path not restored
+            meta = PlanMetadata(title=config.prompt[:60], num_phases=0, completed_phases=0)
+        else:
+            # Prompt-mode interrupted before plan draft — PlanDraftStage will set meta
+            meta = None
 
         # Populate _run_state for interrupt-safe snapshots
         _run_state.snap_dir = snap_dir
         _run_state.config = config
         _run_state.progress = progress
-        _run_state.parsed_plan = parsed_plan
+        _run_state.plan = plan
         _run_state.work_dir = work_dir
 
         # Startup banner
         fields = [
-            ("Plan", meta.title),
-            ("File", str(config.plan_path)),
-            ("Phases", str(meta.num_phases)),
-            ("Snapshot", str(snap_dir)),
+            ("Plan", meta.title if meta else config.prompt[:60]),
         ]
+        if config.plan_path:
+            fields.append(("File", str(config.plan_path)))
+        if meta and meta.num_phases:
+            fields.append(("Phases", str(meta.num_phases)))
+        fields.append(("Snapshot", str(snap_dir)))
         if resume_completed_phases:
             fields.append(("Resuming", f"skipping phases {sorted(resume_completed_phases)}"))
         completed_stages = []
+        if progress.research_done:
+            completed_stages.append("research")
+        if progress.plan_draft_done:
+            completed_stages.append("plan-draft")
         if progress.plan_review_done:
             completed_stages.append("plan-review")
         if progress.implementation_done:
@@ -290,10 +329,20 @@ def _run() -> None:
         display.banner("Review-Implement-Fix", "RESUMED", fields)
 
     else:
-        # Fresh run -- require plan_path
-        if args.plan_path is None:
-            display.error("plan_path is required (unless using --resume or --list-snapshots)")
-            sys.exit(1)
+        # Determine invocation mode and prompt
+        prompt = args.prompt or ""
+        if args.plan_path is None and not prompt:
+            # Interactive mode: collect task description
+            from .feedback import collect_feedback
+            prompt = collect_feedback("Task description", is_initial_input=True) or ""
+            if not prompt:
+                display.error(
+                    "No task description provided. Usage:\n"
+                    "  rpi <plan-file>          # run with existing plan\n"
+                    "  rpi --prompt \"...\"        # start from research\n"
+                    "  rpi                       # interactive mode"
+                )
+                sys.exit(1)
 
         # Build config: CLI flags override env vars, env vars override defaults
         push = (
@@ -334,10 +383,17 @@ def _run() -> None:
                     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", worktree_name).strip("-")
                     if not slug:
                         slug = f"rpi-{ts}"
-                else:
+                elif args.plan_path is not None:
                     # Auto-derive from plan filename: 2026-03-11-add-search.md -> add-search
                     plan_stem = args.plan_path.stem
                     slug = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", plan_stem)
+                    slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-")
+                    if not slug:
+                        slug = f"rpi-{ts}"
+                else:
+                    # Derive from prompt in prompt mode
+                    words = prompt.split()[:4]
+                    slug = "-".join(words) if words else ""
                     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-")
                     if not slug:
                         slug = f"rpi-{ts}"
@@ -358,7 +414,7 @@ def _run() -> None:
                 worktree_path = str(worktree_dir)
 
         config = Config(
-            plan_path=args.plan_path.resolve(),
+            plan_path=args.plan_path.resolve() if args.plan_path else None,
             min_score=args.min_score or int(os.environ.get("MIN_SCORE", "8")),
             max_review_iters=args.max_review_iters
             or int(os.environ.get("MAX_REVIEW_ITERS", "5")),
@@ -388,24 +444,28 @@ def _run() -> None:
             dry_run=args.dry_run
             if args.dry_run is not None
             else os.environ.get("DRY_RUN", "0") == "1",
+            prompt=prompt,
+            skip_research=args.skip_research or (args.research is not None),
+            research_path=args.research.resolve() if args.research else None,
         )
 
-        if not config.plan_path.is_file():
-            display.error(f"Plan file not found: {config.plan_path}")
-            sys.exit(1)
+        if config.plan_path is not None:
+            if not config.plan_path.is_file():
+                display.error(f"Plan file not found: {config.plan_path}")
+                sys.exit(1)
 
-        # Pre-flight: validate the file looks like a plan (not a spec/research doc)
-        validation_errors = validate_plan_file(config.plan_path)
-        if validation_errors:
-            display.error(f"{config.plan_path} does not look like a plan file:")
-            for err in validation_errors:
-                display.info(f"  - {err}")
-            display.info(
-                "RPI expects a plan file from .claude/plans/ with implementation phases, "
-                "task definitions, group labels, and verification commands. "
-                "If this is a spec, run '/plan' on it first."
-            )
-            sys.exit(1)
+            # Pre-flight: validate the file looks like a plan (not a spec/research doc)
+            validation_errors = validate_plan_file(config.plan_path)
+            if validation_errors:
+                display.error(f"{config.plan_path} does not look like a plan file:")
+                for err in validation_errors:
+                    display.info(f"  - {err}")
+                display.info(
+                    "RPI expects a plan file from .claude/plans/ with implementation phases, "
+                    "task definitions, group labels, and verification commands. "
+                    "If this is a spec, run '/plan' on it first."
+                )
+                sys.exit(1)
 
         # Create shared workspace
         work_dir = Path(tempfile.mkdtemp(prefix="rpi-"))
@@ -420,17 +480,29 @@ def _run() -> None:
         _run_state.progress = progress
         _run_state.work_dir = work_dir
 
-        # Parse plan
-        meta = parse_plan_metadata(config.plan_path)
+        # Parse plan metadata (deferred in prompt mode until plan draft completes)
+        if config.plan_path is not None:
+            meta = parse_plan_metadata(config.plan_path)
+        else:
+            meta = None
 
         # Startup banner
-        fields = [
-            ("Plan", meta.title),
-            ("File", str(config.plan_path)),
-            ("Phases", str(meta.num_phases)),
-            ("Config", f"min_score={config.min_score}, max_review={config.max_review_iters}, "
-             f"max_fix={config.max_fix_iters}, quorum={config.review_quorum}"),
-        ]
+        if meta:
+            fields = [
+                ("Plan", meta.title),
+                ("File", str(config.plan_path)),
+                ("Phases", str(meta.num_phases)),
+                ("Config", f"min_score={config.min_score}, max_review={config.max_review_iters}, "
+                 f"max_fix={config.max_fix_iters}, quorum={config.review_quorum}"),
+            ]
+        else:
+            fields = [
+                ("Prompt", prompt),
+                ("Config", f"min_score={config.min_score}, max_review={config.max_review_iters}, "
+                 f"max_fix={config.max_fix_iters}, quorum={config.review_quorum}"),
+            ]
+            if config.research_path:
+                fields.append(("Research", str(config.research_path)))
         if config.worktree:
             fields.append(("Worktree", config.worktree))
         skips = [
@@ -459,14 +531,19 @@ def _run() -> None:
         snap_dir=snap_dir,
         progress=progress,
         meta=meta,
-        parsed_plan=parsed_plan,
+        plan=plan,
         resume_completed_phases=resume_completed_phases,
     )
 
+    if config.research_path:
+        ctx.research_path = config.research_path
+
     # Update _run_state for interrupt-safe snapshots
-    _run_state.parsed_plan = parsed_plan
+    _run_state.plan = plan
 
     stages = [
+        ResearchStage(),
+        PlanDraftStage(),
         PreflightStage(),
         PlanReviewStage(),
         ImplementStage(),
@@ -478,7 +555,7 @@ def _run() -> None:
         stage.execute(ctx)
         # Keep _run_state in sync
         _run_state.progress = ctx.progress
-        _run_state.parsed_plan = ctx.parsed_plan
+        _run_state.plan = ctx.plan
 
     print_summary(ctx)
 
