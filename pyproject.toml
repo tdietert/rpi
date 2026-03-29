@@ -3,7 +3,7 @@ name = "rpi"
 version = "0.1.0"
 description = "Review-Plan-Implement-Fix automation for the Claude CLI"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.0", "rich>=13.0"]
+dependencies = ["pydantic>=2.0", "prompt-toolkit>=3.0", "rich>=13.0"]
 
 [project.scripts]
 rpi = "rpi.__main__:main"
