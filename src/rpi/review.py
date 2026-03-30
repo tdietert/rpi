@@ -11,6 +11,7 @@ from statistics import median
 from .display import Display
 from .process import (
     _parse_structured,
+    make_dry_run_default,
     run_claude_with_display,
     start_quorum,
 )
@@ -56,18 +57,6 @@ class ReviewLoopResult:
     converged: bool     # True if passed threshold
 
 
-def _dry_run_review() -> ReviewResult:
-    return ReviewResult(
-        score=18,
-        correctness=5,
-        completeness=4,
-        simplicity=5,
-        clarity=4,
-        issues=[],
-        suggested_changes=[],
-    )
-
-
 def run_review_quorum(
     prompt: str,
     quorum_size: int,
@@ -80,7 +69,15 @@ def run_review_quorum(
     if dry_run:
         if display is not None:
             display.info(f"[dim]\\[DRY RUN] Would launch {quorum_size} parallel reviewers[/dim]")
-        r = _dry_run_review()
+        r = make_dry_run_default(ReviewResult)
+        # Override scores to max so the dry-run review is accepted on the first
+        # iteration.  Without this, auto-generated defaults may produce scores
+        # below the passing threshold, causing the review loop to re-iterate.
+        r.correctness = 5
+        r.completeness = 5
+        r.simplicity = 5
+        r.clarity = 5
+        r.score = 20
         return QuorumResult(aggregated=r, per_reviewer=[])
 
     qp = start_quorum(
@@ -187,7 +184,6 @@ def _apply_feedback(
             work_dir=work_dir,
             dry_run=dry_run,
             worktree=worktree,
-            dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
         )
 
     # Build feedback text

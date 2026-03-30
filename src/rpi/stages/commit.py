@@ -18,16 +18,6 @@ class CommitResult(BaseModel):
     errors: str = Field(description="Any errors encountered, or 'None'")
 
 
-def _dry_run_commit() -> CommitResult:
-    return CommitResult(
-        status="success",
-        num_commits=1,
-        commits=["(dry run commit)"],
-        summary="(dry run)",
-        errors="None",
-    )
-
-
 class CommitStage(Stage):
     name = "commit"
     label = "Stage 4: Commit"
@@ -49,7 +39,6 @@ class CommitStage(Stage):
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
                 worktree=config.worktree,
-                dry_run_default=_dry_run_commit(),
                 activity=act,
             )
             act.complete(

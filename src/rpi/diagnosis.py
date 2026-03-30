@@ -100,40 +100,6 @@ class VerificationFixResult(BaseModel):
     summary: str = Field(description="What was changed and why")
 
 
-def _dry_run_diagnosis() -> DiagnosisResult:
-    return DiagnosisResult(
-        pattern="diminishing_returns",
-        summary="(dry run)",
-        score_trajectory="(dry run)",
-        recurring_issues=[],
-        recommendations=[],
-    )
-
-
-def _dry_run_impl_diagnosis() -> ImplementationDiagnosisResult:
-    return ImplementationDiagnosisResult(
-        root_cause="(dry run)",
-        attempt_analysis=[],
-        recommendations=[],
-    )
-
-
-def _dry_run_triage() -> VerificationTriageResult:
-    return VerificationTriageResult(
-        verdict="command_wrong",
-        corrected_command="echo ok",
-        corrected_commands=["echo ok"],
-        reasoning="(dry run)",
-    )
-
-
-def _dry_run_fix() -> VerificationFixResult:
-    return VerificationFixResult(
-        changes_applied=0,
-        summary="(dry run)",
-    )
-
-
 def run_diagnosis(
     history: list[IterationRecord],
     loop_type: str,
@@ -172,7 +138,6 @@ def run_diagnosis(
             work_dir=work_dir,
             dry_run=dry_run,
             worktree=worktree,
-            dry_run_default=_dry_run_diagnosis(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise
@@ -315,7 +280,6 @@ def triage_verification_failure(
             dry_run=dry_run,
             worktree=worktree,
             model="haiku",
-            dry_run_default=_dry_run_triage(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise
@@ -358,7 +322,6 @@ def run_verification_fix(
             work_dir=work_dir,
             dry_run=dry_run,
             worktree=worktree,
-            dry_run_default=_dry_run_fix(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise
@@ -421,7 +384,6 @@ def run_implementation_diagnosis(
             work_dir=work_dir,
             dry_run=dry_run,
             worktree=worktree,
-            dry_run_default=_dry_run_impl_diagnosis(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise

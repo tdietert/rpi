@@ -8,16 +8,75 @@ import queue
 import signal
 import subprocess
 import threading
+import types
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TypeVar
+from typing import Literal, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 
 from .display import Display, StreamActivity
 from .types import Effort
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _get_constraint(metadata: list, attr: str):
+    """Return the first non-None value of *attr* found in field metadata entries."""
+    for m in metadata:
+        val = getattr(m, attr, None)
+        if val is not None:
+            return val
+    return None
+
+
+def _make_value(annotation, metadata=None):
+    """Generate a plausible dry-run value for a type annotation."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin is Literal:
+        return args[0]
+
+    if origin is Union or isinstance(annotation, types.UnionType):
+        for arg in args:
+            if arg is not type(None):
+                return _make_value(arg, metadata)
+        return None
+
+    if origin is list:
+        min_length = _get_constraint(metadata or [], "min_length") or 0
+        if args:
+            return [_make_value(args[0]) for _ in range(min_length)]
+        return []
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return make_dry_run_default(annotation)
+
+    if annotation is str:
+        return "(dry run)"
+    if annotation is int:
+        ge = _get_constraint(metadata or [], "ge")
+        return ge if ge is not None else 0
+    if annotation is float:
+        return 0.0
+    if annotation is bool:
+        return False
+
+    raise TypeError(f"Unsupported type {annotation!r} in dry-run value generation")
+
+
+def make_dry_run_default(schema: type[T]) -> T:
+    """Auto-generate a valid dry-run instance by introspecting Pydantic field metadata."""
+    values: dict = {}
+    for name, field_info in schema.model_fields.items():
+        if field_info.default is not PydanticUndefined:
+            continue
+        if field_info.default_factory is not None:
+            continue
+        values[name] = _make_value(field_info.annotation, field_info.metadata)
+    return schema(**values)
 
 
 _child_procs: list[subprocess.Popen] = []
@@ -281,21 +340,15 @@ def run_claude_structured(
     dry_run: bool = False,
     worktree: str = "",
     model: str | None = None,
-    dry_run_default: T | None = None,
     activity: StreamActivity | None = None,
 ) -> T:
     """Run claude -p with --json-schema and return a validated Pydantic model.
-
-    Each call site can provide a dry_run_default for plausible dry-run output.
-    If none is provided, falls back to schema.model_validate({}).
 
     When *activity* is provided, each streaming line is forwarded to it so the
     caller can render live progress.
     """
     if dry_run:
-        if dry_run_default is not None:
-            return dry_run_default
-        return schema.model_validate({})
+        return make_dry_run_default(schema)
     schema_str = json.dumps(schema.model_json_schema())
     handle = start_claude(prompt, effort=effort, work_dir=work_dir, json_schema_str=schema_str, worktree=worktree, model=model)
     for line in handle.lines():
@@ -319,7 +372,7 @@ def run_claude_with_display(
 
     When *display* and *label* are provided, wraps the call in a display
     activity with streaming. Otherwise calls run_claude_structured directly.
-    Extra **kwargs are forwarded (effort, work_dir, dry_run, worktree, model, dry_run_default).
+    Extra **kwargs are forwarded (effort, work_dir, dry_run, worktree, model).
     """
     if display is not None and label:
         with display.activity(label, log_name or label.lower().replace(" ", "-")) as act:

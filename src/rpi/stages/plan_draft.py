@@ -8,45 +8,12 @@ from pathlib import Path
 from ..plan import (
     Plan,
     PlanMetadata,
-    PlanPhase,
-    PlanTask,
     plan_file_path,
     serialize_plan_to_markdown,
     validate_plan,
 )
 from ..process import run_claude_structured
 from . import Stage
-
-
-def _dry_run_plan() -> Plan:
-    return Plan(
-        title="(dry run)",
-        overview="(dry run)",
-        current_state="(dry run)",
-        desired_end_state="(dry run)",
-        phases=[
-            PlanPhase(
-                number=1,
-                name="(dry run)",
-                goal="(dry run)",
-                tasks=[
-                    PlanTask(
-                        id="1.1",
-                        name="(dry run)",
-                        files=["(dry run)"],
-                        group="A",
-                        steps=["(dry run)"],
-                    )
-                ],
-                verification=["(dry run)"],
-                verification_commands=["echo ok"],
-            )
-        ],
-        testing_strategy="(dry run)",
-        risks=[],
-        open_questions="None",
-    )
-
 
 _PLAN_SYSTEM = (
     "You are creating a detailed implementation plan. "
@@ -105,7 +72,6 @@ class PlanDraftStage(Stage):
                 worktree=config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
-                dry_run_default=_dry_run_plan(),
                 activity=act,
             )
             act.complete("success", f"{plan.title} ({len(plan.phases)} phases)")
@@ -147,7 +113,6 @@ class PlanDraftStage(Stage):
                     worktree=config.worktree,
                     work_dir=ctx.work_dir,
                     dry_run=config.dry_run,
-                    dry_run_default=_dry_run_plan(),
                     activity=act,
                 )
                 act.complete("success", f"{plan.title} ({len(plan.phases)} phases)")
@@ -202,7 +167,6 @@ class PlanDraftStage(Stage):
                     worktree=ctx.config.worktree,
                     work_dir=ctx.work_dir,
                     dry_run=ctx.config.dry_run,
-                    dry_run_default=_dry_run_plan(),
                     activity=act,
                 )
                 act.complete("success", "structure fixed")

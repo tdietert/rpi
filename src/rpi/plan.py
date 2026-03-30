@@ -289,36 +289,6 @@ def validate_plan(plan: Plan, display: Display | None = None) -> list[str]:
     return errors
 
 
-def _dry_run_plan() -> Plan:
-    """Create a plausible dry-run Plan."""
-    return Plan(
-        title="(dry run plan)",
-        overview="(dry run)",
-        current_state="(dry run)",
-        desired_end_state="(dry run)",
-        phases=[
-            PlanPhase(
-                number=1,
-                name="(dry run phase)",
-                goal="(dry run)",
-                tasks=[
-                    PlanTask(
-                        id="1.1",
-                        name="(dry run task)",
-                        files=["example.ts"],
-                        group="A",
-                        steps=["(dry run step)"],
-                    )
-                ],
-                verification=["(dry run verification)"],
-            )
-        ],
-        testing_strategy="(dry run)",
-        risks=[],
-        open_questions="None",
-    )
-
-
 def run_plan_processing(
     config: Config, work_dir: Path, display: Display
 ) -> Plan:
@@ -356,7 +326,6 @@ def run_plan_processing(
             work_dir=work_dir,
             dry_run=config.dry_run,
             worktree=config.worktree,
-            dry_run_default=_dry_run_plan(),
             activity=act,
         )
         act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")
@@ -408,7 +377,6 @@ def run_plan_processing(
                 work_dir=work_dir,
                 dry_run=config.dry_run,
                 worktree=config.worktree,
-                dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
                 activity=act,
             )
             act.complete("success", f"{fix_result.changes_applied} changes — {fix_result.summary}")
@@ -439,7 +407,6 @@ def run_plan_processing(
                 work_dir=work_dir,
                 dry_run=config.dry_run,
                 worktree=config.worktree,
-                dry_run_default=_dry_run_plan(),
                 activity=act,
             )
             act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")

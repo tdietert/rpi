@@ -9,20 +9,6 @@ from ..process import run_claude_structured
 from ..research import Research, research_file_path, serialize_to_markdown
 from . import Stage
 
-
-def _dry_run_research(prompt: str) -> Research:
-    return Research(
-        title="(dry run)",
-        question=prompt,
-        summary="(dry run)",
-        findings=[],
-        architecture="(dry run)",
-        patterns="(dry run)",
-        code_references=[],
-        open_questions=[],
-    )
-
-
 _RESEARCH_SYSTEM = (
     "You are researching a codebase to document what exists. "
     "Your job is to explore, understand, and report — not to suggest changes. "
@@ -67,7 +53,6 @@ class ResearchStage(Stage):
                 worktree=config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
-                dry_run_default=_dry_run_research(config.prompt),
                 activity=act,
             )
             act.complete("success", research.title)
@@ -106,7 +91,6 @@ class ResearchStage(Stage):
                     worktree=config.worktree,
                     work_dir=ctx.work_dir,
                     dry_run=config.dry_run,
-                    dry_run_default=_dry_run_research(config.prompt),
                     activity=act,
                 )
                 act.complete("success", research.title)

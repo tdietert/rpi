@@ -32,16 +32,6 @@ class PhaseResult(BaseModel):
     verification: str = Field(description="Result of verification steps")
 
 
-def _dry_run_phase_result() -> PhaseResult:
-    return PhaseResult(
-        status="success",
-        phase=0,
-        summary="(dry run)",
-        errors="None",
-        verification="Skipped",
-    )
-
-
 def _run_verification_commands(
     commands: list[str], worktree: str = ""
 ) -> tuple[bool, str]:
@@ -131,7 +121,6 @@ class ImplementStage(Stage):
                     work_dir=work_dir,
                     dry_run=config.dry_run,
                     worktree=config.worktree,
-                    dry_run_default=_dry_run_phase_result(),
                     activity=act,
                 )
                 act.complete(

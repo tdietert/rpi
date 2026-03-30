@@ -20,16 +20,6 @@ class PrResult(BaseModel):
     errors: str = Field(description="Any errors encountered, or 'None'")
 
 
-def _dry_run_pr() -> PrResult:
-    return PrResult(
-        status="success",
-        pr_url="https://github.com/example/repo/pull/0",
-        pr_title="(dry run PR)",
-        summary="(dry run)",
-        errors="None",
-    )
-
-
 def _run_push(display: Display, dry_run: bool, worktree: str = "") -> bool:
     """Push the current branch to origin. Returns True on success."""
     if dry_run:
@@ -97,7 +87,6 @@ class PushPrStage(Stage):
                     work_dir=ctx.work_dir,
                     dry_run=config.dry_run,
                     worktree=config.worktree,
-                    dry_run_default=_dry_run_pr(),
                     activity=act,
                 )
                 act.complete(
