@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import textwrap
 import time
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .display import Display, _wrap_text
-from .process import run_claude_structured
-from .review import IterationRecord, _format_iteration_history
+from .display import Display
+from .plan import PlanPhase
+from .process import run_claude_with_display
+from .types import IterationRecord, format_iteration_history
 
 
 class DiagnosisResult(BaseModel):
@@ -98,8 +100,6 @@ class VerificationFixResult(BaseModel):
     summary: str = Field(description="What was changed and why")
 
 
-
-
 def _dry_run_diagnosis() -> DiagnosisResult:
     return DiagnosisResult(
         pattern="diminishing_returns",
@@ -134,8 +134,6 @@ def _dry_run_fix() -> VerificationFixResult:
     )
 
 
-
-
 def run_diagnosis(
     history: list[IterationRecord],
     loop_type: str,
@@ -147,7 +145,7 @@ def run_diagnosis(
     display: Display | None = None,
 ) -> DiagnosisResult | None:
     """Run the rpi-diagnosis skill to analyze why a loop didn't converge."""
-    history_text = _format_iteration_history(history, loop_type)
+    history_text = format_iteration_history(history, loop_type)
     scores = [rec.aggregated.score // 2 for rec in history]
     score_summary = ", ".join(str(s) for s in scores)
 
@@ -163,9 +161,13 @@ def run_diagnosis(
     )
 
     try:
-        return run_claude_structured(
-            prompt=prompt,
-            schema=DiagnosisResult,
+        return run_claude_with_display(
+            prompt,
+            DiagnosisResult,
+            display=display,
+            label="Convergence Diagnosis",
+            log_name="convergence-diagnosis",
+            complete_summary=lambda r: r.pattern,
             effort="medium",
             work_dir=work_dir,
             dry_run=dry_run,
@@ -198,11 +200,11 @@ def _write_diagnosis_file(diagnosis: DiagnosisResult, loop_type: str) -> Path:
     lines.append(f"  Pattern: {diagnosis.pattern}")
     lines.append("")
     lines.append("  Summary:")
-    for wrapped in _wrap_text(diagnosis.summary, width=width - 4):
+    for wrapped in textwrap.wrap(diagnosis.summary, width=width - 4):
         lines.append(f"    {wrapped}")
     lines.append("")
     lines.append("  Score Trajectory:")
-    for wrapped in _wrap_text(diagnosis.score_trajectory, width=width - 4):
+    for wrapped in textwrap.wrap(diagnosis.score_trajectory, width=width - 4):
         lines.append(f"    {wrapped}")
     lines.append("")
     lines.append(f"  Recurring Issues: ({len(diagnosis.recurring_issues)} items)")
@@ -230,12 +232,10 @@ def print_diagnosis(diagnosis: DiagnosisResult | None, loop_type: str, display: 
         display.info(f"Diagnosis written to: {path}")
 
 
-
-
 def triage_verification_failure(
     failed_command: str,
     error_output: str,
-    phase: object,  # PlanPhase — avoid circular import
+    phase: PlanPhase,
     all_commands: list[str] | None = None,
     work_dir: Path | None = None,
     dry_run: bool = False,
@@ -303,9 +303,13 @@ def triage_verification_failure(
         f"{implementer_context}"
     )
     try:
-        return run_claude_structured(
-            prompt=prompt,
-            schema=VerificationTriageResult,
+        return run_claude_with_display(
+            prompt,
+            VerificationTriageResult,
+            display=display,
+            label="Triage",
+            log_name="triage",
+            complete_summary=lambda r: r.verdict,
             effort="low",
             work_dir=work_dir,
             dry_run=dry_run,
@@ -325,7 +329,7 @@ def run_verification_fix(
     fix_instructions: str,
     failed_command: str,
     error_output: str,
-    phase: object,  # PlanPhase — avoid circular import
+    phase: PlanPhase,
     work_dir: Path | None = None,
     dry_run: bool = False,
     worktree: str = "",
@@ -343,9 +347,13 @@ def run_verification_fix(
         "do not add scope, do not re-implement the phase."
     )
     try:
-        return run_claude_structured(
-            prompt=prompt,
-            schema=VerificationFixResult,
+        return run_claude_with_display(
+            prompt,
+            VerificationFixResult,
+            display=display,
+            label="Verification Fix",
+            log_name="verification-fix",
+            complete_summary=lambda r: r.summary,
             effort="medium",
             work_dir=work_dir,
             dry_run=dry_run,
@@ -402,9 +410,13 @@ def run_implementation_diagnosis(
     )
 
     try:
-        return run_claude_structured(
-            prompt=prompt,
-            schema=ImplementationDiagnosisResult,
+        return run_claude_with_display(
+            prompt,
+            ImplementationDiagnosisResult,
+            display=display,
+            label="Phase Diagnosis",
+            log_name="impl-diagnosis",
+            complete_summary=lambda r: r.root_cause[:60],
             effort="medium",
             work_dir=work_dir,
             dry_run=dry_run,
@@ -438,7 +450,7 @@ def _write_implementation_diagnosis_file(
     lines.append(bar)
     lines.append("")
     lines.append("  Root Cause:")
-    for wrapped in _wrap_text(diagnosis.root_cause, width=width - 4):
+    for wrapped in textwrap.wrap(diagnosis.root_cause, width=width - 4):
         lines.append(f"    {wrapped}")
     lines.append("")
     lines.append(f"  Triage-Fix Analysis: ({len(diagnosis.attempt_analysis)} attempts)")

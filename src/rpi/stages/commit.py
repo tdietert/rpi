@@ -37,21 +37,26 @@ class CommitStage(Stage):
 
     def run(self, ctx) -> None:
         config = ctx.config
-        result = run_claude_structured(
-            prompt=(
-                f"Run /rpi-commit to commit changes related to the plan at {config.plan_path}. "
-                "Read the plan file first to understand what this plan covers, then only commit "
-                "changes that are relevant to the plan. Leave unrelated changes unstaged."
-            ),
-            schema=CommitResult,
-            effort="medium",
-            work_dir=ctx.work_dir,
-            dry_run=config.dry_run,
-            worktree=config.worktree,
-            dry_run_default=_dry_run_commit(),
-        )
+        with ctx.display.activity("Commit", "commit") as act:
+            result = run_claude_structured(
+                prompt=(
+                    f"Run /rpi-commit to commit changes related to the plan at {config.plan_path}. "
+                    "Read the plan file first to understand what this plan covers, then only commit "
+                    "changes that are relevant to the plan. Leave unrelated changes unstaged."
+                ),
+                schema=CommitResult,
+                effort="medium",
+                work_dir=ctx.work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                dry_run_default=_dry_run_commit(),
+                activity=act,
+            )
+            act.complete(
+                "success" if result.status == "success" else "failed",
+                f"{result.num_commits} commits — {result.summary}",
+            )
 
-        ctx.display.info(f"Commit: {result.status} — {result.num_commits} commits, {result.summary}")
         ctx.display.info(f"[green]Stage 4 complete:[/green] {result.status}")
         ctx.commit_result = result
         ctx.progress.commit_done = True

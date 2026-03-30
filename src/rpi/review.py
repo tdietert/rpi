@@ -1,54 +1,27 @@
-"""Review types, quorum logic, and feedback application."""
+"""Review quorum logic, feedback application, and generic review loop."""
 
 from __future__ import annotations
 
 import json
-import os
-import queue
-import signal
-import subprocess
 import sys
-import threading
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field
-
+from .display import Display
 from .process import (
-    _child_procs,
-    _drain_queue,
-    _interrupt,
     _parse_structured,
-    _reader,
-    run_claude_structured,
+    run_claude_with_display,
+    start_quorum,
 )
-
-if TYPE_CHECKING:
-    from .display import Display
-
-
-class ReviewIssue(BaseModel):
-    severity: Literal["critical", "note"]
-    description: str = Field(
-        description="Issue with justification. Format: 'Issue description. Why: concrete consequence.'"
-    )
-
-
-class ReviewResult(BaseModel):
-    score: int = Field(description="Sum of all four dimension scores, out of 20")
-    correctness: int = Field(description="Score out of 5")
-    completeness: int = Field(description="Score out of 5")
-    simplicity: int = Field(description="Score out of 5")
-    clarity: int = Field(description="Score out of 5")
-    issues: list[ReviewIssue] = Field(
-        description="Each issue categorized as 'critical' (blocks implementation) or 'note' (observation, not blocking). Max 3 critical + 2 notes."
-    )
-    suggested_changes: list[str] = Field(
-        description="Each change with justification: 'Change description. Why: what breaks or degrades without it.'"
-    )
+from .types import (
+    ApplyFeedbackResult,
+    IterationRecord,
+    ReviewIssue,
+    ReviewResult,
+    derive_verdict,
+    format_iteration_history,
+)
 
 
 @dataclass
@@ -58,13 +31,29 @@ class QuorumResult:
 
 
 @dataclass
-class IterationRecord:
-    iteration: int
-    aggregated: ReviewResult
-    per_reviewer: list[ReviewResult]
-    apply_summary: str  # empty if no feedback was applied
+class ReviewLoopConfig:
+    loop_type: str              # "plan_review" or "review_fix"
+    review_prompt: str          # base prompt text
+    history_noun: str           # "changes" or "fixes"
+    apply_label: str            # "Applying review feedback to plan..." etc.
+    apply_noun: str             # "changes" or "fixes"
+    pass_message: str           # "Plan review passed:" etc.
+    failure_prompt: str         # "Proceed to implementation anyway?" etc.
+    max_iters: int
+    min_score: int
+    review_quorum: int
+    plan_path: Path | None
+    work_dir: Path
+    dry_run: bool
+    worktree: str
+    apply_path: Path | None     # non-None = plan feedback; None = code fix
 
 
+@dataclass
+class ReviewLoopResult:
+    score: int          # final score on 0-10 scale
+    iterations: int     # iterations actually run
+    converged: bool     # True if passed threshold
 
 
 def _dry_run_review() -> ReviewResult:
@@ -77,130 +66,6 @@ def _dry_run_review() -> ReviewResult:
         issues=[],
         suggested_changes=[],
     )
-
-
-
-
-class QuorumProcess:
-    """Handle for N parallel Claude CLI subprocesses (review quorum)."""
-
-    def __init__(
-        self,
-        procs: list[subprocess.Popen],
-        q: queue.Queue,
-        reader_threads: list[threading.Thread],
-        interrupt: threading.Event,
-        result_holders: list[list[str]],
-    ) -> None:
-        self._procs = procs
-        self._queue = q
-        self._reader_threads = reader_threads
-        self._interrupt = interrupt
-        self._result_holders = result_holders
-        self._exhausted = False
-
-    def tagged_lines(self) -> Iterator[tuple[int, str]]:
-        """Iterate over ``(reviewer_index, line)`` tuples from all reviewers."""
-        try:
-            yield from _drain_queue(
-                self._queue, self._interrupt, sentinel_count=len(self._procs)
-            )
-        finally:
-            self._exhausted = True
-        if self._interrupt.is_set():
-            raise KeyboardInterrupt
-
-    def results(self) -> list[str]:
-        """Return per-reviewer structured result strings.
-
-        Raises ``RuntimeError`` if ``tagged_lines()`` has not been fully consumed.
-        """
-        if not self._exhausted:
-            raise RuntimeError(
-                "tagged_lines() must be exhausted before calling results()"
-            )
-        return [h[0] for h in self._result_holders]
-
-
-def start_quorum(
-    prompt: str,
-    quorum_size: int,
-    work_dir: Path | None = None,
-    worktree: str = "",
-    interrupt: threading.Event | None = None,
-) -> QuorumProcess:
-    """Launch *quorum_size* parallel Claude reviewers and return a handle."""
-    if interrupt is None:
-        interrupt = _interrupt
-
-    full_prompt = prompt
-    if work_dir:
-        full_prompt += (
-            f"\n\nYou have a shared workspace directory at {work_dir} for writing "
-            "intermediate resources (notes, context files, analysis) that later "
-            "agents in this pipeline can read."
-        )
-
-    schema_str = json.dumps(ReviewResult.model_json_schema())
-    cmd = [
-        "claude",
-        "-p",
-        full_prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--json-schema",
-        schema_str,
-        "--effort",
-        "medium",
-        "--dangerously-skip-permissions",
-        "--settings",
-        json.dumps({"outputStyle": ""}),
-    ]
-
-    procs: list[subprocess.Popen] = []
-    result_holders: list[list[str]] = []
-    threads: list[threading.Thread] = []
-    q: queue.Queue = queue.Queue()
-
-    try:
-        for i in range(quorum_size):
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-                cwd=worktree or None,
-            )
-            _child_procs.append(proc)
-            procs.append(proc)
-
-            rh: list[str] = [""]
-            result_holders.append(rh)
-            t = threading.Thread(
-                target=_reader, args=(proc, q, rh, i), daemon=True
-            )
-            t.start()
-            threads.append(t)
-    except Exception:
-        for p in procs:
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except Exception:
-                pass
-        raise
-
-    return QuorumProcess(procs, q, threads, interrupt, result_holders)
-
-
-def _derive_verdict(result: ReviewResult) -> str:
-    """Derive verdict from issues: any critical issue -> NeedsRevision, else Ready."""
-    if any(i.severity == "critical" for i in result.issues):
-        return "NeedsRevision"
-    return "Ready"
-
-
 
 
 def run_review_quorum(
@@ -219,8 +84,9 @@ def run_review_quorum(
         return QuorumResult(aggregated=r, per_reviewer=[])
 
     qp = start_quorum(
-        prompt=prompt,
-        quorum_size=quorum_size,
+        prompt,
+        quorum_size,
+        json_schema_str=json.dumps(ReviewResult.model_json_schema()),
         work_dir=work_dir,
         worktree=worktree,
     )
@@ -290,22 +156,42 @@ def run_review_quorum(
     return QuorumResult(aggregated=aggregated, per_reviewer=results)
 
 
-
-
-from .plan import ApplyFeedbackResult
-
-
-def _apply_quorum_feedback(
+def _apply_feedback(
     per_reviewer: list[ReviewResult],
     quorum_size: int,
-    path: Path,
     work_dir: Path | None,
     dry_run: bool,
     worktree: str = "",
+    display: Display | None = None,
+    path: Path | None = None,
 ) -> ApplyFeedbackResult:
-    """Synthesize and apply quorum feedback to the plan file."""
+    """Synthesize quorum feedback and apply it.
+
+    When *path* is set, generates plan-file-oriented prompt.
+    When *path* is None, generates code-fix-oriented prompt (``/rpi-fix``).
+    """
+    is_plan = path is not None
+    label = "Apply Feedback" if is_plan else "Apply Fix"
+    log_name = "apply-feedback" if is_plan else "apply-fix"
+    noun = "changes" if is_plan else "fixes"
+
+    def _run(prompt: str) -> ApplyFeedbackResult:
+        return run_claude_with_display(
+            prompt,
+            ApplyFeedbackResult,
+            display=display,
+            label=label,
+            log_name=log_name,
+            complete_summary=lambda r: f"{r.changes_applied} {noun} — {r.summary}",
+            effort="medium",
+            work_dir=work_dir,
+            dry_run=dry_run,
+            worktree=worktree,
+            dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
+        )
+
+    # Build feedback text
     if quorum_size <= 1 or len(per_reviewer) <= 1:
-        # Single reviewer path: flat list
         r = per_reviewer[0]
         issues_text = "\n".join(
             f"- [{i.severity.upper()}] {i.description}" for i in r.issues
@@ -313,8 +199,8 @@ def _apply_quorum_feedback(
         changes_text = (
             "\n".join(f"- {c}" for c in r.suggested_changes) or "- None"
         )
-        return run_claude_structured(
-            prompt=(
+        if is_plan:
+            return _run(
                 f"Read the plan file at {path} and apply these improvements:\n\n"
                 f"Issues found:\n{issues_text}\n\n"
                 f"Suggested changes:\n{changes_text}\n\n"
@@ -326,18 +212,17 @@ def _apply_quorum_feedback(
                 "other mentions of the old name/endpoint and update them.\n\n"
                 "Prioritize CRITICAL issues. NOTE items are observations -- apply them only if "
                 "trivially fixable without introducing new changes or touching additional sections."
-            ),
-            schema=ApplyFeedbackResult,
-            effort="medium",
-            work_dir=work_dir,
-            dry_run=dry_run,
-            worktree=worktree,
-            dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
+            )
+        feedback_block = (
+            f"Issues found:\n{issues_text}\n\n"
+            f"Suggested fixes:\n{changes_text}"
         )
+        return _run(f"Run /rpi-fix with the following reviewer feedback:\n\n{feedback_block}")
 
-    # Multiple reviewers: build per-reviewer attributed feedback for synthesis
+    # Multiple reviewers
     n = len(per_reviewer)
     sections: list[str] = []
+    change_label = "Suggested changes" if is_plan else "Suggested fixes"
     for i, r in enumerate(per_reviewer):
         issues_text = "\n".join(
             f"  - [{x.severity.upper()}] {x.description}" for x in r.issues
@@ -346,14 +231,14 @@ def _apply_quorum_feedback(
             "\n".join(f"  - {x}" for x in r.suggested_changes) or "  - None"
         )
         sections.append(
-            f"Reviewer {i + 1} (score {r.score}/20, {_derive_verdict(r)}):\n"
+            f"Reviewer {i + 1} (score {r.score}/20, {derive_verdict(r)}):\n"
             f"  Issues:\n{issues_text}\n"
-            f"  Suggested changes:\n{changes_text}"
+            f"  {change_label}:\n{changes_text}"
         )
     reviewer_block = "\n\n".join(sections)
 
-    return run_claude_structured(
-        prompt=(
+    if is_plan:
+        return _run(
             f"You are given feedback from {n} independent reviewers of an implementation plan.\n\n"
             "Your job:\n"
             f"1. Read the plan file at {path}\n"
@@ -375,75 +260,18 @@ def _apply_quorum_feedback(
             "Be precise -- make the specific changes suggested. Do not add scope or features\n"
             "beyond what reviewers suggested. Do not remove phases or restructure unless\n"
             "reviewers explicitly call for it."
-        ),
-        schema=ApplyFeedbackResult,
-        effort="medium",
-        work_dir=work_dir,
-        dry_run=dry_run,
-        worktree=worktree,
-        dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
+        )
+
+    feedback_block = (
+        f"Feedback from {n} independent reviewers:\n\n"
+        + "\n\n".join(sections)
     )
-
-
-def _apply_quorum_fix(
-    per_reviewer: list[ReviewResult],
-    quorum_size: int,
-    work_dir: Path | None,
-    dry_run: bool,
-    worktree: str = "",
-) -> ApplyFeedbackResult:
-    """Synthesize code review feedback and apply fixes to the codebase."""
-    # Format reviewer feedback for the /rpi-fix skill
-    if quorum_size <= 1 or len(per_reviewer) <= 1:
-        r = per_reviewer[0]
-        issues_text = "\n".join(
-            f"- [{i.severity.upper()}] {i.description}" for i in r.issues
-        ) or "- None"
-        changes_text = (
-            "\n".join(f"- {c}" for c in r.suggested_changes) or "- None"
-        )
-        feedback_block = (
-            f"Issues found:\n{issues_text}\n\n"
-            f"Suggested fixes:\n{changes_text}"
-        )
-    else:
-        n = len(per_reviewer)
-        sections: list[str] = []
-        for i, r in enumerate(per_reviewer):
-            issues_text = "\n".join(
-                f"  - [{x.severity.upper()}] {x.description}" for x in r.issues
-            ) or "  - None"
-            changes_text = (
-                "\n".join(f"  - {x}" for x in r.suggested_changes) or "  - None"
-            )
-            sections.append(
-                f"Reviewer {i + 1} (score {r.score}/20, {_derive_verdict(r)}):\n"
-                f"  Issues:\n{issues_text}\n"
-                f"  Suggested fixes:\n{changes_text}"
-            )
-        feedback_block = (
-            f"Feedback from {n} independent reviewers:\n\n"
-            + "\n\n".join(sections)
-        )
-
-    return run_claude_structured(
-        prompt=(
-            f"Run /rpi-fix with the following reviewer feedback:\n\n{feedback_block}"
-        ),
-        schema=ApplyFeedbackResult,
-        effort="medium",
-        work_dir=work_dir,
-        dry_run=dry_run,
-        worktree=worktree,
-        dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
-    )
+    return _run(f"Run /rpi-fix with the following reviewer feedback:\n\n{feedback_block}")
 
 
 def _has_feedback(per_reviewer: list[ReviewResult]) -> bool:
     """Check if any reviewer produced issues or suggested changes."""
     return any(r.issues or r.suggested_changes for r in per_reviewer)
-
-
 
 
 def _write_iteration_history(
@@ -453,7 +281,7 @@ def _write_iteration_history(
 ) -> Path:
     """Write cumulative iteration history to the workspace for downstream agents."""
     history_path = work_dir / f"{loop_type}-history.md"
-    text = _format_iteration_history(history, loop_type)
+    text = format_iteration_history(history, loop_type)
     header = (
         f"# {loop_type.replace('_', ' ').title()} -- Iteration History\n\n"
         "This file records what previous review iterations flagged and what\n"
@@ -464,34 +292,111 @@ def _write_iteration_history(
     return history_path
 
 
-def _format_iteration_history(
-    history: list[IterationRecord],
-    loop_type: str,
-) -> str:
-    """Format iteration history for the diagnosis agent prompt."""
-    sections: list[str] = []
-    for rec in history:
-        agg = rec.aggregated
-        lines = [
-            f"### Iteration {rec.iteration}",
-            f"Aggregated: score={agg.score}/20 ({agg.score // 2}/10), verdict={_derive_verdict(agg)}",
-            f"  correctness={agg.correctness}, completeness={agg.completeness}, "
-            f"simplicity={agg.simplicity}, clarity={agg.clarity}",
-        ]
-        if len(rec.per_reviewer) > 1:
-            for i, r in enumerate(rec.per_reviewer):
-                lines.append(
-                    f"  Reviewer {i + 1}: score={r.score}/20, verdict={_derive_verdict(r)}"
-                )
-        if agg.issues:
-            lines.append("Issues:")
-            for issue in agg.issues:
-                lines.append(f"  - [{issue.severity.upper()}] {issue.description}")
-        if agg.suggested_changes:
-            lines.append("Suggested changes:")
-            for change in agg.suggested_changes:
-                lines.append(f"  - {change}")
-        if rec.apply_summary:
-            lines.append(f"Fix applied: {rec.apply_summary}")
-        sections.append("\n".join(lines))
-    return "\n\n".join(sections)
+def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopResult:
+    """Run the shared review-iterate-apply loop.
+
+    Used by both PlanReviewStage and ReviewFixStage.
+    """
+    from .diagnosis import print_diagnosis, run_diagnosis
+
+    score_10 = 0
+    history: list[IterationRecord] = []
+
+    for iteration in range(1, config.max_iters + 1):
+        display.stage_header(
+            f"{config.loop_type.replace('_', ' ').title()} iteration "
+            f"{iteration}/{config.max_iters}"
+        )
+
+        review_prompt = config.review_prompt
+        if history:
+            history_path = config.work_dir / f"{config.loop_type}-history.md"
+            review_prompt += (
+                f"\n\nIMPORTANT: This is iteration {iteration}. Read the "
+                f"iteration history at {history_path} before reviewing. It "
+                f"records what previous reviewers flagged and what {config.history_noun} were "
+                "applied. Do not re-flag issues that were already addressed."
+            )
+
+        quorum_result = run_review_quorum(
+            prompt=review_prompt,
+            quorum_size=config.review_quorum,
+            work_dir=config.work_dir,
+            dry_run=config.dry_run,
+            worktree=config.worktree,
+            display=display,
+        )
+        result = quorum_result.aggregated
+
+        score_10 = result.score // 2
+        score_style = "green" if score_10 >= config.min_score else "yellow"
+        display.info(
+            f"Score: [{score_style}]{score_10}/10[/{score_style}] ({result.score}/20), "
+            f"Verdict: {derive_verdict(result)}"
+        )
+        if result.issues:
+            n_critical = sum(1 for i in result.issues if i.severity == "critical")
+            n_notes = sum(1 for i in result.issues if i.severity == "note")
+            display.info(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
+            for issue in result.issues[:5]:
+                display.info(f"  - \\[{issue.severity.upper()}] {issue.description[:100]}")
+            if len(result.issues) > 5:
+                display.info(f"  ... and {len(result.issues) - 5} more")
+
+        apply_summary = ""
+        if _has_feedback(quorum_result.per_reviewer):
+            display.info(config.apply_label)
+            apply_result = _apply_feedback(
+                per_reviewer=quorum_result.per_reviewer,
+                quorum_size=config.review_quorum,
+                work_dir=config.work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                display=display,
+                path=config.apply_path,
+            )
+            display.info(
+                f"Applied {config.apply_noun}: {apply_result.changes_applied} "
+                f"{config.apply_noun} — {apply_result.summary}"
+            )
+            apply_summary = (
+                f"{apply_result.changes_applied} {config.apply_noun}: {apply_result.summary}"
+            )
+
+        history.append(IterationRecord(
+            iteration=iteration,
+            aggregated=result,
+            per_reviewer=quorum_result.per_reviewer,
+            apply_summary=apply_summary,
+        ))
+        _write_iteration_history(history, config.loop_type, config.work_dir)
+
+        if score_10 >= config.min_score and derive_verdict(result) == "Ready":
+            display.info(
+                f"[green]{config.pass_message}[/green] {score_10}/10 after {iteration} iteration(s)."
+            )
+            return ReviewLoopResult(score=score_10, iterations=iteration, converged=True)
+
+        if iteration >= config.max_iters:
+            display.warn(
+                f"{config.loop_type.replace('_', ' ').title()} did not converge after "
+                f"{config.max_iters} iterations (score: {score_10}/10)."
+            )
+            display.info("Running convergence diagnosis...")
+            diagnosis = run_diagnosis(
+                history=history,
+                loop_type=config.loop_type,
+                plan_path=config.plan_path,
+                min_score=config.min_score,
+                work_dir=config.work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                display=display,
+            )
+            print_diagnosis(diagnosis, config.loop_type, display=display)
+            if not display.confirm(config.failure_prompt):
+                display.info("Stopped.")
+                sys.exit(1)
+            return ReviewLoopResult(score=score_10, iterations=config.max_iters, converged=False)
+
+    return ReviewLoopResult(score=score_10, iterations=config.max_iters, converged=False)

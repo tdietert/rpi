@@ -18,7 +18,7 @@ from ..diagnosis import (
 )
 from ..plan import PlanPhase
 from ..process import run_claude_structured
-from ..snapshot import SnapshotPhaseProgress
+from ..types import SnapshotPhaseProgress
 from . import Stage
 
 
@@ -32,8 +32,6 @@ class PhaseResult(BaseModel):
     verification: str = Field(description="Result of verification steps")
 
 
-
-
 def _dry_run_phase_result() -> PhaseResult:
     return PhaseResult(
         status="success",
@@ -42,8 +40,6 @@ def _dry_run_phase_result() -> PhaseResult:
         errors="None",
         verification="Skipped",
     )
-
-
 
 
 def _run_verification_commands(
@@ -90,8 +86,6 @@ def _format_phase_prompt(phase: PlanPhase, plan_path: Path) -> str:
     ])
 
 
-
-
 class ImplementStage(Stage):
     name = "implement"
     label = "Stage 2: Implementation"
@@ -126,16 +120,24 @@ class ImplementStage(Stage):
                 f"Groups: {', '.join(sorted({t.group for t in phase.tasks}))}"
             )
 
-            result = run_claude_structured(
-                prompt=_format_phase_prompt(phase, path),
-                schema=PhaseResult,
-                effort="medium",
-                work_dir=work_dir,
-                dry_run=config.dry_run,
-                worktree=config.worktree,
-                dry_run_default=_dry_run_phase_result(),
-            )
-            ctx.display.info(f"Phase {phase_num}: {result.status} — {result.summary}")
+            with ctx.display.activity(
+                f"Phase {phase_num}/{num_phases}: {phase.name}",
+                f"implement-phase-{phase_num}",
+            ) as act:
+                result = run_claude_structured(
+                    prompt=_format_phase_prompt(phase, path),
+                    schema=PhaseResult,
+                    effort="medium",
+                    work_dir=work_dir,
+                    dry_run=config.dry_run,
+                    worktree=config.worktree,
+                    dry_run_default=_dry_run_phase_result(),
+                    activity=act,
+                )
+                act.complete(
+                    "success" if result.status == "success" else "failed",
+                    result.summary,
+                )
 
             has_verification = bool(phase.verification_commands)
 

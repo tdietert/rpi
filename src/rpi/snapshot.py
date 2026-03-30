@@ -13,57 +13,22 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from .display import Display
-from .types import Config
+from .plan import Plan, extract_plan_frontmatter
+from .types import Config, SnapshotStageProgress
 
-
-class SnapshotPhaseProgress(BaseModel):
-    """Tracks which implementation phases have completed."""
-    completed_phases: list[int] = Field(default_factory=list)
-    phase_attempts: dict[str, int] = Field(default_factory=dict)
-
-
-class SnapshotReviewProgress(BaseModel):
-    """Tracks progress within a review loop."""
-    completed_iterations: int = 0
-    last_score: int | None = None
-
-
-class SnapshotStageProgress(BaseModel):
-    """Tracks which stages are done and in-flight progress."""
-    plan_review_done: bool = False
-    plan_review: SnapshotReviewProgress | None = None
-    implementation_done: bool = False
-    implementation: SnapshotPhaseProgress | None = None
-    review_fix_done: bool = False
-    review_fix: SnapshotReviewProgress | None = None
-    commit_done: bool = False
-    push_or_pr_done: bool = False
-    research_done: bool = False
-    plan_draft_done: bool = False
+_V1_CONFIG_FIELDS = {
+    "plan_path", "min_score", "max_review_iters", "max_fix_iters",
+    "review_quorum", "skip_plan_review", "skip_implement", "skip_fix",
+    "skip_commit", "skip_pr", "push", "worktree", "dry_run", "prompt",
+    "skip_research", "research_path",
+}
 
 
 class Snapshot(BaseModel):
     """Complete RPI run state, serializable to JSON."""
-    version: int = 1
+    version: int = 2
     timestamp: str = ""
-
-    # Config fields (flattened)
-    plan_path: str = ""
-    min_score: int = 8
-    max_review_iters: int = 5
-    max_fix_iters: int = 5
-    review_quorum: int = 3
-    skip_plan_review: bool = False
-    skip_implement: bool = False
-    skip_fix: bool = False
-    skip_commit: bool = False
-    skip_pr: bool = False
-    push: bool = False
-    worktree: str = ""
-    dry_run: bool = False
-    prompt: str = ""
-    skip_research: bool = False
-    research_path: str = ""
+    config: Config = Field(default_factory=Config)
 
     # Parsed plan (JSON-serialized)
     plan_json: str | None = None
@@ -74,7 +39,20 @@ class Snapshot(BaseModel):
     # Paths to copied supporting files within the snapshot dir
     copied_files: dict[str, str] = Field(default_factory=dict)
 
-
+    @classmethod
+    def from_v1(cls, data: dict) -> Snapshot:
+        """Migrate a v1 (flat config fields) snapshot dict to v2 (nested config)."""
+        config_data: dict = {}
+        for key in _V1_CONFIG_FIELDS:
+            if key in data:
+                val = data.pop(key)
+                # v1 stored paths as strings; convert empty strings to None
+                if key in ("plan_path", "research_path"):
+                    val = val if val else None
+                config_data[key] = val
+        data["config"] = config_data
+        data["version"] = 2
+        return cls.model_validate(data)
 
 
 def create_snapshot_dir(config: Config) -> Path:
@@ -98,15 +76,10 @@ def save_snapshot(
     snap_dir: Path,
     config: Config,
     progress: SnapshotStageProgress,
-    plan: object | None,
+    plan: Plan | None,
     work_dir: Path,
 ) -> None:
-    """Write snapshot.json and copy supporting files.
-
-    plan is typed as object to avoid importing Plan here;
-    it must be a Pydantic BaseModel with model_dump_json().
-    """
-    from .plan import _extract_plan_frontmatter
+    """Write snapshot.json and copy supporting files."""
 
     copied_files: dict[str, str] = {}
 
@@ -117,7 +90,7 @@ def save_snapshot(
 
     # Copy research/spec from plan front matter
     if config.plan_path is not None and config.plan_path.is_file():
-        fm = _extract_plan_frontmatter(config.plan_path)
+        fm = extract_plan_frontmatter(config.plan_path)
         plan_dir = config.plan_path.parent
         for label in ("research", "spec"):
             raw = fm.get(label, "")
@@ -141,61 +114,44 @@ def save_snapshot(
         shutil.copytree(str(work_dir), str(work_snap))
 
     snapshot = Snapshot(
-        version=1,
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        plan_path=str(config.plan_path) if config.plan_path else "",
-        min_score=config.min_score,
-        max_review_iters=config.max_review_iters,
-        max_fix_iters=config.max_fix_iters,
-        review_quorum=config.review_quorum,
-        skip_plan_review=config.skip_plan_review,
-        skip_implement=config.skip_implement,
-        skip_fix=config.skip_fix,
-        skip_commit=config.skip_commit,
-        skip_pr=config.skip_pr,
-        push=config.push,
-        worktree=config.worktree,
-        dry_run=config.dry_run,
-        prompt=config.prompt,
-        skip_research=config.skip_research,
-        research_path=str(config.research_path) if config.research_path else "",
-        plan_json=(
-            plan.model_dump_json() if plan else None
-        ),
+        config=config,
+        plan_json=plan.model_dump_json() if plan else None,
         progress=progress,
         copied_files=copied_files,
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"),
     )
     (snap_dir / "snapshot.json").write_text(snapshot.model_dump_json(indent=2))
 
 
 def load_snapshot(snap_dir: Path, display: Display | None = None) -> Snapshot:
-    """Load a snapshot from disk."""
+    """Load a snapshot from disk, migrating v1 format if needed."""
+    import json as _json
+
     snap_path = snap_dir / "snapshot.json"
     if not snap_path.is_file():
         if display is not None:
             display.error(f"No snapshot.json found in {snap_dir}")
         sys.exit(1)
-    return Snapshot.model_validate_json(snap_path.read_text())
+    data = _json.loads(snap_path.read_text())
+    if data.get("version", 1) < 2:
+        return Snapshot.from_v1(data)
+    return Snapshot.model_validate(data)
 
 
 def restore_from_snapshot(
     snap_dir: Path, display: Display | None = None,
-) -> tuple[Config, object | None, Path, SnapshotStageProgress]:
+) -> tuple[Config, Plan | None, Path, SnapshotStageProgress]:
     """Reconstruct state from a snapshot directory.
 
     Returns (config, plan_or_None, work_dir, progress).
-    plan is returned as a Plan but typed loosely to keep
-    the import lazy.
     """
-    from .plan import Plan
 
     snapshot = load_snapshot(snap_dir, display=display)
+    config = snapshot.config.model_copy()
 
     # Resolve plan_path: in prompt mode (no plan file), skip resolution
-    plan_path: Path | None = None
-    if snapshot.plan_path:
-        # Plan-file mode: resolve the plan path
-        resolved = Path(snapshot.plan_path)
+    if config.plan_path is not None:
+        resolved = config.plan_path
         if not resolved.is_file():
             snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
             if snap_plan.is_file():
@@ -204,53 +160,27 @@ def restore_from_snapshot(
                     display.warn(f"Original plan file not found, using snapshot copy: {snap_plan}")
             else:
                 if display is not None:
-                    display.error(f"Plan file not found: {snapshot.plan_path}")
+                    display.error(f"Plan file not found: {config.plan_path}")
                 sys.exit(1)
-        plan_path = resolved
-    elif snapshot.prompt and snapshot.progress.plan_draft_done:
-        # Prompt mode with plan draft completed: restore plan_path from snapshot
+        config.plan_path = resolved
+    elif config.prompt and snapshot.progress.plan_draft_done:
         snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
         if snap_plan.is_file():
-            plan_path = snap_plan
-
-    # Restore research_path
-    research_path: Path | None = None
-    if snapshot.research_path:
-        research_path = Path(snapshot.research_path)
+            config.plan_path = snap_plan
 
     # Set skip flags for completed new stages
-    skip_research = snapshot.skip_research
     if snapshot.progress.research_done:
-        skip_research = True
+        config.skip_research = True
 
     # Verify worktree still exists on disk
-    if snapshot.worktree and not Path(snapshot.worktree).is_dir():
+    if config.worktree and not Path(config.worktree).is_dir():
         if display is not None:
             display.error(
-                f"Worktree from snapshot no longer exists: {snapshot.worktree}\n"
+                f"Worktree from snapshot no longer exists: {config.worktree}\n"
                 "  It may have been cleaned up since the snapshot was saved.\n"
                 "  Re-run without --resume, or use --worktree to create a new one."
             )
         sys.exit(1)
-
-    config = Config(
-        plan_path=plan_path,
-        min_score=snapshot.min_score,
-        max_review_iters=snapshot.max_review_iters,
-        max_fix_iters=snapshot.max_fix_iters,
-        review_quorum=snapshot.review_quorum,
-        skip_plan_review=snapshot.skip_plan_review,
-        skip_implement=snapshot.skip_implement,
-        skip_fix=snapshot.skip_fix,
-        skip_commit=snapshot.skip_commit,
-        skip_pr=snapshot.skip_pr,
-        push=snapshot.push,
-        worktree=snapshot.worktree,
-        dry_run=snapshot.dry_run,
-        prompt=snapshot.prompt,
-        skip_research=skip_research,
-        research_path=research_path,
-    )
 
     plan = None
     if snapshot.plan_json:

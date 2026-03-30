@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from unittest.mock import MagicMock
@@ -11,14 +12,16 @@ import pytest
 from rpi.process import (
     _SENTINEL,
     ClaudeProcess,
+    QuorumProcess,
     _child_procs,
     _drain_queue,
     _interrupt,
+    _parse_stream_event,
     _reader,
-    _sigint_handler,
+    _tool_input_summary,
     cleanup_children,
+    sigint_handler,
 )
-from rpi.review import QuorumProcess
 
 
 def test_drain_queue_yields_items_then_stops():
@@ -128,9 +131,9 @@ class TestInterrupt:
         _interrupt.clear()
         assert not _interrupt.is_set()
 
-    def test_sigint_handler_sets_interrupt(self):
+    def testsigint_handler_sets_interrupt(self):
         _interrupt.clear()
-        _sigint_handler(0, None)
+        sigint_handler(0, None)
         assert _interrupt.is_set()
         _interrupt.clear()
 
@@ -153,3 +156,98 @@ class TestInterrupt:
         result = _interrupt.wait(timeout=5.0)
         assert result is True
         _interrupt.clear()
+
+
+class TestParseStreamEvent:
+    def test_text_delta(self):
+        event = json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}})
+        holder = [""]
+        assert _parse_stream_event(event, holder) == "hello"
+
+    def test_assistant_text_blocks(self):
+        event = json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "analysis"}]},
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) == "analysis"
+
+    def test_content_block_start_tool_use(self):
+        event = json.dumps({
+            "type": "content_block_start",
+            "content_block": {"type": "tool_use", "id": "t1", "name": "Read", "input": {}},
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) == "-> Read"
+
+    def test_content_block_start_tool_use_with_input(self):
+        event = json.dumps({
+            "type": "content_block_start",
+            "content_block": {
+                "type": "tool_use",
+                "id": "t1",
+                "name": "Read",
+                "input": {"file_path": "src/main.py"},
+            },
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) == "-> Read src/main.py"
+
+    def test_content_block_start_text_returns_none(self):
+        event = json.dumps({
+            "type": "content_block_start",
+            "content_block": {"type": "text", "text": ""},
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) is None
+
+    def test_assistant_tool_use_blocks(self):
+        event = json.dumps({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Grep", "input": {"pattern": "TODO"}},
+            ]},
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) == "-> Grep TODO"
+
+    def test_input_json_delta_returns_none(self):
+        event = json.dumps({
+            "type": "content_block_delta",
+            "delta": {"type": "input_json_delta", "partial_json": '{"file_path":'},
+        })
+        holder = [""]
+        assert _parse_stream_event(event, holder) is None
+
+    def test_result_stores_structured_output(self):
+        event = json.dumps({"type": "result", "structured_output": '{"score": 18}'})
+        holder = [""]
+        assert _parse_stream_event(event, holder) is None
+        assert holder[0] == '{"score": 18}'
+
+    def test_unknown_event_returns_none(self):
+        event = json.dumps({"type": "system", "data": "something"})
+        holder = [""]
+        assert _parse_stream_event(event, holder) is None
+
+
+class TestToolInputSummary:
+    def test_file_path(self):
+        assert _tool_input_summary({"file_path": "src/main.py"}) == "src/main.py"
+
+    def test_pattern(self):
+        assert _tool_input_summary({"pattern": "TODO.*fix"}) == "TODO.*fix"
+
+    def test_command(self):
+        assert _tool_input_summary({"command": "ls -la"}) == "ls -la"
+
+    def test_empty_input(self):
+        assert _tool_input_summary({}) == ""
+
+    def test_fallback_to_first_string(self):
+        assert _tool_input_summary({"custom_key": "value"}) == "value"
+
+    def test_truncation(self):
+        long_val = "x" * 100
+        result = _tool_input_summary({"file_path": long_val})
+        assert len(result) == 80

@@ -97,15 +97,18 @@ class PlanDraftStage(Stage):
         parts.append(f"## Instructions\n\n{_PLAN_INSTRUCTIONS}")
         prompt = "\n".join(parts)
 
-        plan = run_claude_structured(
-            prompt=prompt,
-            schema=Plan,
-            effort="high",
-            worktree=config.worktree,
-            work_dir=ctx.work_dir,
-            dry_run=config.dry_run,
-            dry_run_default=_dry_run_plan(),
-        )
+        with ctx.display.activity("Plan Draft", "plan-draft") as act:
+            plan = run_claude_structured(
+                prompt=prompt,
+                schema=Plan,
+                effort="high",
+                worktree=config.worktree,
+                work_dir=ctx.work_dir,
+                dry_run=config.dry_run,
+                dry_run_default=_dry_run_plan(),
+                activity=act,
+            )
+            act.complete("success", f"{plan.title} ({len(plan.phases)} phases)")
 
         # Validate with auto-fix loop
         plan = self._validate_with_fix(plan, ctx)
@@ -121,7 +124,6 @@ class PlanDraftStage(Stage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md)
 
-        ctx.display.info(f"Plan: {plan.title} ({len(plan.phases)} phases)")
         ctx.display.info(f"Plan written to: {path}")
 
         # Feedback loop
@@ -137,19 +139,21 @@ class PlanDraftStage(Stage):
                 f"Re-investigate as needed using your tools. "
                 f"Fill in ALL fields of the Plan schema."
             )
-            plan = run_claude_structured(
-                prompt=update_prompt,
-                schema=Plan,
-                effort="high",
-                worktree=config.worktree,
-                work_dir=ctx.work_dir,
-                dry_run=config.dry_run,
-                dry_run_default=_dry_run_plan(),
-            )
+            with ctx.display.activity("Plan Draft (update)", "plan-draft-update") as act:
+                plan = run_claude_structured(
+                    prompt=update_prompt,
+                    schema=Plan,
+                    effort="high",
+                    worktree=config.worktree,
+                    work_dir=ctx.work_dir,
+                    dry_run=config.dry_run,
+                    dry_run_default=_dry_run_plan(),
+                    activity=act,
+                )
+                act.complete("success", f"{plan.title} ({len(plan.phases)} phases)")
             plan = self._validate_with_fix(plan, ctx)
             md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str)
             path.write_text(md)
-            ctx.display.info(f"Plan: {plan.title} ({len(plan.phases)} phases)")
             ctx.display.info(f"Plan written to: {path}")
 
         # Set context for downstream stages
@@ -190,14 +194,16 @@ class PlanDraftStage(Stage):
                 "only fix numbering, duplicate IDs, or cross-group file overlap.\n\n"
                 f"## Instructions\n\n{_PLAN_INSTRUCTIONS}"
             )
-            plan = run_claude_structured(
-                prompt=fix_prompt,
-                schema=Plan,
-                effort="low",
-                worktree=ctx.config.worktree,
-                work_dir=ctx.work_dir,
-                dry_run=ctx.config.dry_run,
-                dry_run_default=_dry_run_plan(),
-            )
+            with ctx.display.activity("Plan Fix", f"plan-fix-{attempt + 1}") as act:
+                plan = run_claude_structured(
+                    prompt=fix_prompt,
+                    schema=Plan,
+                    effort="low",
+                    worktree=ctx.config.worktree,
+                    work_dir=ctx.work_dir,
+                    dry_run=ctx.config.dry_run,
+                    dry_run_default=_dry_run_plan(),
+                    activity=act,
+                )
+                act.complete("success", "structure fixed")
         return plan
-

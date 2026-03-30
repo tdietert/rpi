@@ -348,4 +348,3 @@ class Display:
             return None
         stripped = text.strip()
         return stripped if stripped else None
-

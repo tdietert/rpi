@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .display import Display
 from .process import run_claude_structured
-from .types import Config
+from .types import ApplyFeedbackResult, Config
 
 
 class PlanTask(BaseModel):
@@ -62,16 +62,7 @@ class PlanMetadata:
     completed_phases: int
 
 
-class ApplyFeedbackResult(BaseModel):
-    changes_applied: int
-    summary: str = Field(
-        description="One-line summary of changes made to the plan"
-    )
-
-
-
-
-def _extract_plan_frontmatter(plan_path: Path) -> dict[str, str]:
+def extract_plan_frontmatter(plan_path: Path) -> dict[str, str]:
     """Parse YAML front matter (between --- fences) from a plan file.
 
     Returns a dict of key-value pairs.  No pyyaml dependency — simple
@@ -96,8 +87,6 @@ def _extract_plan_frontmatter(plan_path: Path) -> dict[str, str]:
     return result
 
 
-
-
 def parse_plan_metadata(path: Path) -> PlanMetadata:
     """Extract title, phase count, and completed phase count from a plan file."""
     text = path.read_text()
@@ -110,8 +99,6 @@ def parse_plan_metadata(path: Path) -> PlanMetadata:
     )
 
 
-
-
 def validate_plan_file(path: Path) -> list[str]:
     """Cheap, deterministic pre-flight check that a file looks like a plan.
 
@@ -121,7 +108,7 @@ def validate_plan_file(path: Path) -> list[str]:
     """
     errors: list[str] = []
     text = path.read_text()
-    fm = _extract_plan_frontmatter(path)
+    fm = extract_plan_frontmatter(path)
 
     # Check 1: Wrong directory (spec or research file)
     parts = path.parts
@@ -172,8 +159,6 @@ def validate_plan_file(path: Path) -> list[str]:
         )
 
     return errors
-
-
 
 
 def serialize_plan_to_markdown(
@@ -261,8 +246,6 @@ def plan_file_path(title: str, date: str) -> Path:
     return Path(f".claude/plans/{date}-{kebab}.md")
 
 
-
-
 def validate_plan(plan: Plan, display: Display | None = None) -> list[str]:
     """Run cross-item semantic checks that Pydantic cannot express.
 
@@ -304,8 +287,6 @@ def validate_plan(plan: Plan, display: Display | None = None) -> list[str]:
             )
 
     return errors
-
-
 
 
 def _dry_run_plan() -> Plan:
@@ -351,87 +332,7 @@ def run_plan_processing(
     display.info("Parsing plan into structured representation...")
 
     plan_text = path.read_text()
-    parsed = run_claude_structured(
-        prompt=(
-            "Extract the implementation plan into the provided JSON schema. "
-            "Read the plan text below and populate every field precisely from "
-            "the plan content. Do not invent information -- extract only what "
-            "is written.\n\n"
-            "For each task, the 'id' is the X.Y number (e.g. '1.1', '2.3'), "
-            "'name' is the short descriptive name after the Task heading, "
-            "'files' are from the **Files:** line, 'group' is from the **Group:** "
-            "line, and 'steps' are the checkbox items (without the '- [ ] ' or "
-            "'- [x] ' prefix).\n\n"
-            "For verification, extract each verification item as a string "
-            "(without checkbox prefix).\n\n"
-            "For verification_commands, extract each command from the "
-            "**Verification Commands:** backtick-quoted items as raw strings "
-            "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
-            f"Plan text:\n\n{plan_text}"
-        ),
-        schema=Plan,
-        effort="low",
-        work_dir=work_dir,
-        dry_run=config.dry_run,
-        worktree=config.worktree,
-        dry_run_default=_dry_run_plan(),
-    )
-
-    display.info(f"Parsed Plan: {parsed.title} ({len(parsed.phases)} phases)")
-
-    # Deterministic validation + auto-fix loop
-    max_fix_attempts = 3
-    for attempt in range(max_fix_attempts):
-        validation_errors = validate_plan(parsed, display)
-        if not validation_errors:
-            display.info("[green]Plan structure validated.[/green]")
-            return parsed
-
-        display.warn("Plan structure validation found issues:")
-        for err in validation_errors:
-            display.info(f"  - {err}")
-
-        if attempt >= max_fix_attempts - 1:
-            display.error(
-                "The plan file cannot be reliably executed after "
-                f"{max_fix_attempts} fix attempts. Fix the plan manually and re-run."
-            )
-            sys.exit(1)
-
-        # Ask an agent to fix the structural issues in the plan file
-        display.info(f"Fixing plan structure (attempt {attempt + 1}/{max_fix_attempts})...")
-        fix_result = run_claude_structured(
-            prompt=(
-                f"The plan file at {path} has structural issues that prevent "
-                "automated execution. Fix ONLY these specific issues by editing "
-                "the plan file:\n\n"
-                + "\n".join(f"- {e}" for e in validation_errors)
-                + "\n\n"
-                "Rules for fixing:\n"
-                "- Cross-group file overlap: merge the tasks that share files "
-                "into the same Group (pick the group that already has more tasks "
-                "touching that file, or merge the smaller group into the larger). "
-                "Do NOT split tasks or change their content.\n"
-                "- Non-sequential phase numbering: renumber phases sequentially "
-                "starting from 1. Update task IDs to match (e.g., if Phase 3 "
-                "becomes Phase 2, task 3.1 becomes 2.1).\n"
-                "- Duplicate task IDs: renumber tasks sequentially within their "
-                "phase.\n\n"
-                "Make minimal edits. Do not change task content, goals, steps, "
-                "files, or verification. Only fix the structural issues listed above."
-            ),
-            schema=ApplyFeedbackResult,
-            effort="low",
-            work_dir=work_dir,
-            dry_run=config.dry_run,
-            worktree=config.worktree,
-            dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
-        )
-        display.info(f"Plan Structure Fix: {fix_result.changes_applied} changes — {fix_result.summary}")
-
-        # Re-parse the modified plan
-        display.info("Re-parsing fixed plan...")
-        plan_text = path.read_text()
+    with display.activity("Parse Plan", "parse-plan") as act:
         parsed = run_claude_structured(
             prompt=(
                 "Extract the implementation plan into the provided JSON schema. "
@@ -456,8 +357,92 @@ def run_plan_processing(
             dry_run=config.dry_run,
             worktree=config.worktree,
             dry_run_default=_dry_run_plan(),
+            activity=act,
         )
-        display.info(f"Re-parsed Plan: {parsed.title} ({len(parsed.phases)} phases)")
+        act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")
+
+    # Deterministic validation + auto-fix loop
+    max_fix_attempts = 3
+    for attempt in range(max_fix_attempts):
+        validation_errors = validate_plan(parsed, display)
+        if not validation_errors:
+            display.info("[green]Plan structure validated.[/green]")
+            return parsed
+
+        display.warn("Plan structure validation found issues:")
+        for err in validation_errors:
+            display.info(f"  - {err}")
+
+        if attempt >= max_fix_attempts - 1:
+            display.error(
+                "The plan file cannot be reliably executed after "
+                f"{max_fix_attempts} fix attempts. Fix the plan manually and re-run."
+            )
+            sys.exit(1)
+
+        # Ask an agent to fix the structural issues in the plan file
+        display.info(f"Fixing plan structure (attempt {attempt + 1}/{max_fix_attempts})...")
+        with display.activity("Fix Plan Structure", f"fix-plan-{attempt + 1}") as act:
+            fix_result = run_claude_structured(
+                prompt=(
+                    f"The plan file at {path} has structural issues that prevent "
+                    "automated execution. Fix ONLY these specific issues by editing "
+                    "the plan file:\n\n"
+                    + "\n".join(f"- {e}" for e in validation_errors)
+                    + "\n\n"
+                    "Rules for fixing:\n"
+                    "- Cross-group file overlap: merge the tasks that share files "
+                    "into the same Group (pick the group that already has more tasks "
+                    "touching that file, or merge the smaller group into the larger). "
+                    "Do NOT split tasks or change their content.\n"
+                    "- Non-sequential phase numbering: renumber phases sequentially "
+                    "starting from 1. Update task IDs to match (e.g., if Phase 3 "
+                    "becomes Phase 2, task 3.1 becomes 2.1).\n"
+                    "- Duplicate task IDs: renumber tasks sequentially within their "
+                    "phase.\n\n"
+                    "Make minimal edits. Do not change task content, goals, steps, "
+                    "files, or verification. Only fix the structural issues listed above."
+                ),
+                schema=ApplyFeedbackResult,
+                effort="low",
+                work_dir=work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
+                activity=act,
+            )
+            act.complete("success", f"{fix_result.changes_applied} changes — {fix_result.summary}")
+
+        # Re-parse the modified plan
+        plan_text = path.read_text()
+        with display.activity("Re-parse Plan", f"reparse-plan-{attempt + 1}") as act:
+            parsed = run_claude_structured(
+                prompt=(
+                    "Extract the implementation plan into the provided JSON schema. "
+                    "Read the plan text below and populate every field precisely from "
+                    "the plan content. Do not invent information -- extract only what "
+                    "is written.\n\n"
+                    "For each task, the 'id' is the X.Y number (e.g. '1.1', '2.3'), "
+                    "'name' is the short descriptive name after the Task heading, "
+                    "'files' are from the **Files:** line, 'group' is from the **Group:** "
+                    "line, and 'steps' are the checkbox items (without the '- [ ] ' or "
+                    "'- [x] ' prefix).\n\n"
+                    "For verification, extract each verification item as a string "
+                    "(without checkbox prefix).\n\n"
+                    "For verification_commands, extract each command from the "
+                    "**Verification Commands:** backtick-quoted items as raw strings "
+                    "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
+                    f"Plan text:\n\n{plan_text}"
+                ),
+                schema=Plan,
+                effort="low",
+                work_dir=work_dir,
+                dry_run=config.dry_run,
+                worktree=config.worktree,
+                dry_run_default=_dry_run_plan(),
+                activity=act,
+            )
+            act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")
 
     # Unreachable, but satisfies the type checker
     sys.exit(1)

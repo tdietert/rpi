@@ -59,15 +59,18 @@ class ResearchStage(Stage):
             f"## Instructions\n\n{_RESEARCH_INSTRUCTIONS}"
         )
 
-        research = run_claude_structured(
-            prompt=prompt,
-            schema=Research,
-            effort="high",
-            worktree=config.worktree,
-            work_dir=ctx.work_dir,
-            dry_run=config.dry_run,
-            dry_run_default=_dry_run_research(config.prompt),
-        )
+        with ctx.display.activity("Research", "research") as act:
+            research = run_claude_structured(
+                prompt=prompt,
+                schema=Research,
+                effort="high",
+                worktree=config.worktree,
+                work_dir=ctx.work_dir,
+                dry_run=config.dry_run,
+                dry_run_default=_dry_run_research(config.prompt),
+                activity=act,
+            )
+            act.complete("success", research.title)
 
         # Serialize and write
         md = serialize_to_markdown(research, today)
@@ -79,7 +82,6 @@ class ResearchStage(Stage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md)
 
-        ctx.display.info(f"Research complete: {research.title}")
         ctx.display.info(f"Research written to: {path}")
 
         # Feedback loop
@@ -96,22 +98,23 @@ class ResearchStage(Stage):
                 f"Re-investigate as needed using your tools. "
                 f"Fill in ALL fields of the Research schema."
             )
-            research = run_claude_structured(
-                prompt=update_prompt,
-                schema=Research,
-                effort="high",
-                worktree=config.worktree,
-                work_dir=ctx.work_dir,
-                dry_run=config.dry_run,
-                dry_run_default=_dry_run_research(config.prompt),
-            )
+            with ctx.display.activity("Research (update)", "research-update") as act:
+                research = run_claude_structured(
+                    prompt=update_prompt,
+                    schema=Research,
+                    effort="high",
+                    worktree=config.worktree,
+                    work_dir=ctx.work_dir,
+                    dry_run=config.dry_run,
+                    dry_run_default=_dry_run_research(config.prompt),
+                    activity=act,
+                )
+                act.complete("success", research.title)
             md = serialize_to_markdown(research, today)
             path.write_text(md)
-            ctx.display.info(f"Research complete: {research.title}")
             ctx.display.info(f"Research written to: {path}")
 
         ctx.research_path = path
         ctx.config.research_path = path
         ctx.research = research
         ctx.progress.research_done = True
-

@@ -10,8 +10,8 @@ from typing import Any
 from ..display import Display
 from ..plan import Plan, PlanMetadata
 from ..research import Research
-from ..snapshot import SnapshotStageProgress, save_snapshot
-from ..types import Config
+from ..snapshot import save_snapshot
+from ..types import Config, SnapshotStageProgress
 
 
 @dataclass

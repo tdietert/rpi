@@ -89,16 +89,21 @@ class PushPrStage(Stage):
             ctx.display.info("[dim]Stage 5: Create PR -- SKIPPED (commit failed)[/dim]")
         else:
             ctx.display.stage_header("Stage 5: Create PR")
-            pr_result = run_claude_structured(
-                prompt="Run /rpi-create-pr to create a GitHub PR for this branch.",
-                schema=PrResult,
-                effort="medium",
-                work_dir=ctx.work_dir,
-                dry_run=config.dry_run,
-                worktree=config.worktree,
-                dry_run_default=_dry_run_pr(),
-            )
-            ctx.display.info(f"PR: {pr_result.status} — {pr_result.pr_url}")
+            with ctx.display.activity("Create PR", "create-pr") as act:
+                pr_result = run_claude_structured(
+                    prompt="Run /rpi-create-pr to create a GitHub PR for this branch.",
+                    schema=PrResult,
+                    effort="medium",
+                    work_dir=ctx.work_dir,
+                    dry_run=config.dry_run,
+                    worktree=config.worktree,
+                    dry_run_default=_dry_run_pr(),
+                    activity=act,
+                )
+                act.complete(
+                    "success" if pr_result.status == "success" else "failed",
+                    pr_result.pr_url or pr_result.status,
+                )
             ctx.display.info(f"[green]Stage 5 complete:[/green] {pr_result.status}")
             ctx.pr_result = pr_result
             ctx.progress.push_or_pr_done = True
