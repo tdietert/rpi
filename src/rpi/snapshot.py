@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from .display import display
+from .display import Display
 from .types import Config
 
 
@@ -168,17 +168,18 @@ def save_snapshot(
     (snap_dir / "snapshot.json").write_text(snapshot.model_dump_json(indent=2))
 
 
-def load_snapshot(snap_dir: Path) -> Snapshot:
+def load_snapshot(snap_dir: Path, display: Display | None = None) -> Snapshot:
     """Load a snapshot from disk."""
     snap_path = snap_dir / "snapshot.json"
     if not snap_path.is_file():
-        display.error(f"No snapshot.json found in {snap_dir}")
+        if display is not None:
+            display.error(f"No snapshot.json found in {snap_dir}")
         sys.exit(1)
     return Snapshot.model_validate_json(snap_path.read_text())
 
 
 def restore_from_snapshot(
-    snap_dir: Path,
+    snap_dir: Path, display: Display | None = None,
 ) -> tuple[Config, object | None, Path, SnapshotStageProgress]:
     """Reconstruct state from a snapshot directory.
 
@@ -188,7 +189,7 @@ def restore_from_snapshot(
     """
     from .plan import Plan
 
-    snapshot = load_snapshot(snap_dir)
+    snapshot = load_snapshot(snap_dir, display=display)
 
     # Resolve plan_path: in prompt mode (no plan file), skip resolution
     plan_path: Path | None = None
@@ -199,9 +200,11 @@ def restore_from_snapshot(
             snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
             if snap_plan.is_file():
                 resolved = snap_plan
-                display.warn(f"Original plan file not found, using snapshot copy: {snap_plan}")
+                if display is not None:
+                    display.warn(f"Original plan file not found, using snapshot copy: {snap_plan}")
             else:
-                display.error(f"Plan file not found: {snapshot.plan_path}")
+                if display is not None:
+                    display.error(f"Plan file not found: {snapshot.plan_path}")
                 sys.exit(1)
         plan_path = resolved
     elif snapshot.prompt and snapshot.progress.plan_draft_done:
@@ -222,11 +225,12 @@ def restore_from_snapshot(
 
     # Verify worktree still exists on disk
     if snapshot.worktree and not Path(snapshot.worktree).is_dir():
-        display.error(
-            f"Worktree from snapshot no longer exists: {snapshot.worktree}\n"
-            "  It may have been cleaned up since the snapshot was saved.\n"
-            "  Re-run without --resume, or use --worktree to create a new one."
-        )
+        if display is not None:
+            display.error(
+                f"Worktree from snapshot no longer exists: {snapshot.worktree}\n"
+                "  It may have been cleaned up since the snapshot was saved.\n"
+                "  Re-run without --resume, or use --worktree to create a new one."
+            )
         sys.exit(1)
 
     config = Config(

@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 import json
+import os
+import queue
+import signal
 import subprocess
 import sys
 import threading
-import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
-from .display import display
 from .process import (
     _child_procs,
-    _extract_event_text,
+    _drain_queue,
     _interrupt,
     _parse_structured,
-    _progress_line,
+    _reader,
     run_claude_structured,
 )
+
+if TYPE_CHECKING:
+    from .display import Display
 
 
 class ReviewIssue(BaseModel):
@@ -76,6 +81,119 @@ def _dry_run_review() -> ReviewResult:
 
 
 
+class QuorumProcess:
+    """Handle for N parallel Claude CLI subprocesses (review quorum)."""
+
+    def __init__(
+        self,
+        procs: list[subprocess.Popen],
+        q: queue.Queue,
+        reader_threads: list[threading.Thread],
+        interrupt: threading.Event,
+        result_holders: list[list[str]],
+    ) -> None:
+        self._procs = procs
+        self._queue = q
+        self._reader_threads = reader_threads
+        self._interrupt = interrupt
+        self._result_holders = result_holders
+        self._exhausted = False
+
+    def tagged_lines(self) -> Iterator[tuple[int, str]]:
+        """Iterate over ``(reviewer_index, line)`` tuples from all reviewers."""
+        try:
+            yield from _drain_queue(
+                self._queue, self._interrupt, sentinel_count=len(self._procs)
+            )
+        finally:
+            self._exhausted = True
+        if self._interrupt.is_set():
+            raise KeyboardInterrupt
+
+    def results(self) -> list[str]:
+        """Return per-reviewer structured result strings.
+
+        Raises ``RuntimeError`` if ``tagged_lines()`` has not been fully consumed.
+        """
+        if not self._exhausted:
+            raise RuntimeError(
+                "tagged_lines() must be exhausted before calling results()"
+            )
+        return [h[0] for h in self._result_holders]
+
+
+def start_quorum(
+    prompt: str,
+    quorum_size: int,
+    work_dir: Path | None = None,
+    worktree: str = "",
+    interrupt: threading.Event | None = None,
+) -> QuorumProcess:
+    """Launch *quorum_size* parallel Claude reviewers and return a handle."""
+    if interrupt is None:
+        interrupt = _interrupt
+
+    full_prompt = prompt
+    if work_dir:
+        full_prompt += (
+            f"\n\nYou have a shared workspace directory at {work_dir} for writing "
+            "intermediate resources (notes, context files, analysis) that later "
+            "agents in this pipeline can read."
+        )
+
+    schema_str = json.dumps(ReviewResult.model_json_schema())
+    cmd = [
+        "claude",
+        "-p",
+        full_prompt,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        schema_str,
+        "--effort",
+        "medium",
+        "--dangerously-skip-permissions",
+        "--settings",
+        json.dumps({"outputStyle": ""}),
+    ]
+
+    procs: list[subprocess.Popen] = []
+    result_holders: list[list[str]] = []
+    threads: list[threading.Thread] = []
+    q: queue.Queue = queue.Queue()
+
+    try:
+        for i in range(quorum_size):
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+                cwd=worktree or None,
+            )
+            _child_procs.append(proc)
+            procs.append(proc)
+
+            rh: list[str] = [""]
+            result_holders.append(rh)
+            t = threading.Thread(
+                target=_reader, args=(proc, q, rh, i), daemon=True
+            )
+            t.start()
+            threads.append(t)
+    except Exception:
+        for p in procs:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                pass
+        raise
+
+    return QuorumProcess(procs, q, threads, interrupt, result_holders)
+
+
 def _derive_verdict(result: ReviewResult) -> str:
     """Derive verdict from issues: any critical issue -> NeedsRevision, else Ready."""
     if any(i.severity == "critical" for i in result.issues):
@@ -91,197 +209,71 @@ def run_review_quorum(
     work_dir: Path | None,
     dry_run: bool,
     worktree: str = "",
+    display: Display | None = None,
 ) -> QuorumResult:
     """Run parallel reviewers with streaming display and structured output."""
-    schema_str = json.dumps(ReviewResult.model_json_schema())
-    review_effort = "medium"
-
     if dry_run:
-        display.info(f"[dim]\\[DRY RUN] Would launch {quorum_size} parallel reviewers[/dim]")
+        if display is not None:
+            display.info(f"[dim]\\[DRY RUN] Would launch {quorum_size} parallel reviewers[/dim]")
         r = _dry_run_review()
         return QuorumResult(aggregated=r, per_reviewer=[])
 
-    # Build the full prompt with workspace context
-    full_prompt = prompt
-    if work_dir:
-        full_prompt += (
-            f"\n\nYou have a shared workspace directory at {work_dir} for writing "
-            "intermediate resources (notes, context files, analysis) that later "
-            "agents in this pipeline can read."
-        )
+    qp = start_quorum(
+        prompt=prompt,
+        quorum_size=quorum_size,
+        work_dir=work_dir,
+        worktree=worktree,
+    )
 
-    # Single command: stream-json for live display + --json-schema for
-    # structured output in the final result event.
-    stream_cmd = [
-        "claude",
-        "-p",
-        full_prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--json-schema",
-        schema_str,
-        "--effort",
-        review_effort,
-        "--dangerously-skip-permissions",
-        "--settings",
-        json.dumps({"outputStyle": ""}),
-    ]
+    if display is not None:
+        with display.quorum_activity(
+            "Reviewing", "review-quorum", reviewer_count=quorum_size
+        ) as act:
+            for reviewer, line in qp.tagged_lines():
+                act.stream_line(line, reviewer=reviewer)
+            act.complete("success", "review complete")
+    else:
+        for _ in qp.tagged_lines():
+            pass
 
-    # Launch parallel processes
-    processes: list[subprocess.Popen] = []
-    for _ in range(quorum_size):
-        proc = subprocess.Popen(
-            stream_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-            cwd=worktree or None,
-        )
-        _child_procs.append(proc)
-        processes.append(proc)
-
-    # Per-reviewer state: display buffers, event counts, and raw structured_output strings
-    buffers: list[list[str]] = [[] for _ in range(quorum_size)]
-    event_counts: list[int] = [0] * quorum_size
-    structured_outputs: list[str] = [""] * quorum_size
-    errors: list[str | None] = [None] * quorum_size
-
-    def reader(idx: int, proc: subprocess.Popen) -> None:
-        try:
-            for raw_line in proc.stdout:
-                raw_line = raw_line.strip()
-                if not raw_line:
-                    continue
-                try:
-                    event = json.loads(raw_line)
-                except json.JSONDecodeError:
-                    continue
-                event_counts[idx] += 1
-                if event.get("type") == "result":
-                    # structured_output contains the schema-constrained JSON
-                    so = event.get("structured_output", "")
-                    if isinstance(so, dict):
-                        structured_outputs[idx] = json.dumps(so)
-                    elif isinstance(so, str):
-                        structured_outputs[idx] = so
-                    break
-                text = _extract_event_text(event)
-                if text:
-                    for line in text.split("\n"):
-                        stripped = line.rstrip()
-                        if stripped:
-                            buffers[idx].append(stripped)
-            proc.wait()
-            if proc.returncode != 0:
-                stderr_text = proc.stderr.read() if proc.stderr else ""
-                errors[idx] = f"exit {proc.returncode}: {stderr_text[:200]}"
-        except Exception as e:
-            errors[idx] = str(e)
-
-    # Start reader threads
-    threads = []
-    for i, proc in enumerate(processes):
-        t = threading.Thread(target=reader, args=(i, proc), daemon=True)
-        t.start()
-        threads.append(t)
-
-    # Live display loop: print new text lines as they arrive, show a \r
-    # progress line during quiet periods.
-    quorum_start = time.time()
-    printed_counts = [0] * quorum_size  # how many lines we've already printed
-    while any(t.is_alive() for t in threads) and not _interrupt.is_set():
-        # Check for new text lines from any reviewer
-        has_new = False
-        for i in range(quorum_size):
-            new_start = printed_counts[i]
-            current_len = len(buffers[i])
-            if current_len > new_start:
-                if not has_new:
-                    # Clear the \r progress line before printing text
-                    sys.stderr.write("\r\033[2K")
-                    has_new = True
-                tag = f"R{i + 1}"
-                for line in buffers[i][new_start:current_len]:
-                    sys.stderr.write(f"  [{tag}] {display.truncate(line, display.width - 10)}\n")
-                printed_counts[i] = current_len
-        if has_new:
-            sys.stderr.flush()
-        # Show progress line (overwrites itself on each tick)
-        sys.stderr.write(f"\r{_progress_line(event_counts, quorum_start)}   ")
-        sys.stderr.flush()
-        _interrupt.wait(timeout=1.0)
-        if _interrupt.is_set():
-            break
-
-    # Print any final lines that arrived after the last tick
-    for i in range(quorum_size):
-        for line in buffers[i][printed_counts[i]:]:
-            sys.stderr.write(f"  [R{i + 1}] {display.truncate(line, display.width - 10)}\n")
-
-    # Clear the progress line
-    sys.stderr.write("\r\033[2K")
-    sys.stderr.flush()
-
-    # Clean up child proc tracking
-    for proc in processes:
-        if proc in _child_procs:
-            _child_procs.remove(proc)
-
-    # Parse structured outputs directly into ReviewResult
+    raw_results = qp.results()
     results: list[ReviewResult] = []
-    for i in range(quorum_size):
-        if errors[i]:
-            display.error(f"Reviewer {i + 1}: failed ({errors[i]})")
-            continue
-        raw_so = structured_outputs[i]
-        if not raw_so:
-            n_lines = len(buffers[i])
-            display.warn(f"Reviewer {i + 1}: no structured output ({n_lines} display lines)")
+    for i, raw in enumerate(raw_results):
+        if not raw:
+            if display is not None:
+                display.warn(f"Reviewer {i + 1}: no structured output")
             continue
         try:
-            result = _parse_structured(ReviewResult, raw_so)
+            result = _parse_structured(ReviewResult, raw)
             results.append(result)
-            display.result_panel(f"Reviewer {i + 1}", result)
         except Exception as e:
-            display.error(f"Reviewer {i + 1}: parse failed: {e}")
-            display.info(f"  Raw: {raw_so[:200]}")
+            if display is not None:
+                display.error(f"Reviewer {i + 1}: parse failed: {e}")
 
     if not results:
-        display.error(
-            f"No reviewers produced valid results (0 of {quorum_size})."
-        )
+        if display is not None:
+            display.error(f"No reviewers produced valid results (0 of {quorum_size}).")
         sys.exit(1)
 
-    # Single reviewer: return directly without aggregation
     if len(results) == 1:
         r = results[0]
-        display.info(f"Score: {r.score}/20")
+        if display is not None:
+            display.info(f"Score: {r.score}/20")
         return QuorumResult(aggregated=r, per_reviewer=[r])
 
-    if len(results) < 2:
-        display.error(
-            f"Only {len(results)} of {quorum_size} reviewers produced valid results."
-        )
-        sys.exit(1)
-
-    # Print per-reviewer scores
     scores_str = " ".join(f"R{i+1}:{r.score}/20" for i, r in enumerate(results))
     med_score = int(median(r.score for r in results))
-    display.info(f"{scores_str} -> median {med_score}/20")
+    if display is not None:
+        display.info(f"{scores_str} -> median {med_score}/20")
 
-    # Aggregate scores
     med_correctness = int(median(r.correctness for r in results))
     med_completeness = int(median(r.completeness for r in results))
     med_simplicity = int(median(r.simplicity for r in results))
     med_clarity = int(median(r.clarity for r in results))
 
-    # Collect all issues and suggestions — dedup left to the synthesizer agent
     all_issues: list[ReviewIssue] = []
     for r in results:
         all_issues.extend(r.issues)
-
     all_changes: list[str] = []
     for r in results:
         all_changes.extend(r.suggested_changes)
@@ -295,7 +287,6 @@ def run_review_quorum(
         issues=all_issues,
         suggested_changes=all_changes,
     )
-    display.result_panel("Aggregated Review", aggregated)
     return QuorumResult(aggregated=aggregated, per_reviewer=results)
 
 

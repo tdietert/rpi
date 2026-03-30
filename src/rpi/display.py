@@ -3,24 +3,39 @@
 from __future__ import annotations
 
 import shutil
+import threading
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
-# Pipeline stages for the stage tracker bar
-_STAGES = [
-    ("research", "Research"),
-    ("plan_draft", "Plan Draft"),
-    ("preflight", "Pre-flight"),
-    ("plan_review", "Plan Review"),
-    ("implement", "Implement"),
-    ("review_fix", "Review-Fix"),
-    ("commit", "Commit"),
-    ("push_pr", "Push/PR"),
-]
+if TYPE_CHECKING:
+    from rich.console import RenderableType
+
+DisplayStatus = Literal["success", "failed", "running", "skipped", "warning"]
+ActivityStatus = Literal["success", "failed", "skipped"]
+
+STATUS_ICONS: dict[DisplayStatus, str] = {
+    "success": "✓",
+    "failed": "✗",
+    "running": "⟳",
+    "skipped": "·",
+    "warning": "!",
+}
+
+STATUS_STYLES: dict[DisplayStatus, str] = {
+    "success": "green",
+    "failed": "red",
+    "running": "blue",
+    "skipped": "dim",
+    "warning": "yellow",
+}
 
 
 def _wrap_text(text: str, width: int) -> list[str]:
@@ -41,174 +56,296 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return lines
 
 
+class Activity:
+    """Base class for long-running operations rendered with a Live panel."""
+
+    def __init__(
+        self,
+        label: str,
+        log_path: Path,
+        verbose: bool,
+        _print: Callable[[str], None],
+        _update_live: Callable[[RenderableType], None],
+    ) -> None:
+        self.label = label
+        self._log_path = log_path
+        self._verbose = verbose
+        self._print = _print
+        self._update_live = _update_live
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_file = self._log_path.open("w")
+        self.start_time = time.monotonic()
+        self._completed = False
+
+    def complete(self, status: ActivityStatus, summary: str) -> None:
+        """Mark the activity as completed with a status and summary line."""
+        self._completed = True
+        elapsed = time.monotonic() - self.start_time
+        icon = STATUS_ICONS.get(status, "?")
+        style = STATUS_STYLES.get(status, "")
+        line = f"[{style}]{icon}[/{style}] {self.label} [{style}]{summary}[/{style}] [dim]({elapsed:.1f}s)[/dim]"
+        self._print(line)
+        self._write_log(f"\n--- {status}: {summary} ({elapsed:.1f}s) ---\n")
+        self._log_file.flush()
+
+    def _write_log(self, text: str) -> None:
+        self._log_file.write(text)
+
+    def _close_log(self) -> None:
+        if self._log_file and not self._log_file.closed:
+            self._log_file.close()
+
+
+class StreamActivity(Activity):
+    """Handle for a single-source long-running operation."""
+
+    def __init__(
+        self,
+        label: str,
+        log_path: Path,
+        ring_max: int,
+        verbose: bool,
+        _print: Callable[[str], None],
+        _update_live: Callable[[RenderableType], None],
+    ) -> None:
+        super().__init__(label, log_path, verbose, _print, _update_live)
+        self._ring_buffer: list[str] = []
+        self._ring_max = ring_max
+
+    def stream_line(self, text: str) -> None:
+        if self._completed:
+            raise RuntimeError("Activity already completed")
+        self._ring_buffer.append(text)
+        if len(self._ring_buffer) > self._ring_max:
+            self._ring_buffer = self._ring_buffer[-self._ring_max :]
+        self._write_log(text + "\n")
+        self._update_live(self._build_panel())
+        if self._verbose:
+            self._print(text)
+
+    def _build_panel(self) -> Panel:
+        elapsed = time.monotonic() - self.start_time
+        body = "\n".join(self._ring_buffer) if self._ring_buffer else "[dim]waiting...[/dim]"
+        return Panel(
+            body,
+            title=f"[bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            border_style="blue",
+        )
+
+
+class QuorumActivity(Activity):
+    """Handle for a multi-reviewer operation."""
+
+    def __init__(
+        self,
+        label: str,
+        log_path: Path,
+        reviewer_count: int,
+        verbose: bool,
+        _print: Callable[[str], None],
+        _update_live: Callable[[RenderableType], None],
+    ) -> None:
+        super().__init__(label, log_path, verbose, _print, _update_live)
+        self.reviewer_count = reviewer_count
+        self._event_counts: list[int] = [0] * reviewer_count
+
+    def stream_line(self, text: str, reviewer: int) -> None:
+        if self._completed:
+            raise RuntimeError("Activity already completed")
+        self._event_counts[reviewer] += 1
+        self._write_log(f"[reviewer {reviewer}] {text}\n")
+        self._update_live(self._build_panel())
+        if self._verbose:
+            self._print(f"[dim]\\[reviewer {reviewer}][/dim] {text}")
+
+    def _build_panel(self) -> Panel:
+        elapsed = time.monotonic() - self.start_time
+        lines = []
+        for i, count in enumerate(self._event_counts):
+            lines.append(f"  Reviewer {i + 1}: {count} events")
+        body = "\n".join(lines)
+        return Panel(
+            body,
+            title=f"[bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            border_style="blue",
+        )
+
+
 class Display:
     """Centralized terminal output using rich."""
 
-    def __init__(self) -> None:
-        self.console = Console(stderr=True)  # progress/spinners to stderr
-        self.stdout = Console()  # results/summary to stdout
-        self.width = shutil.get_terminal_size().columns
+    def __init__(self, verbose: bool = False, *, log_dir: Path, width: int | None = None) -> None:
+        self._console = Console(stderr=True)
+        self._stdout = Console()
+        self._verbose = verbose
+        self._log_dir = log_dir
+        self._width = width or min(72, shutil.get_terminal_size().columns)
+        self._lock = threading.Lock()
+        self._active: Activity | None = None
+        self._live: Live | None = None
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+
+    def _print(self, msg: str) -> None:
+        with self._lock:
+            if self._live is not None:
+                self._live.console.print(msg)
+            else:
+                self._console.print(msg)
+
+    def _update_live(self, renderable: RenderableType) -> None:
+        with self._lock:
+            if self._live is not None:
+                self._live.update(renderable)
+                self._live.refresh()
+
+    def _start_live(self) -> None:
+        self._live = Live(console=self._console, auto_refresh=False)
+        self._live.start()
+
+    def _stop_live(self) -> None:
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
+
+    def info(self, msg: str) -> None:
+        self._print(f"  {msg}")
+
+    def success(self, msg: str) -> None:
+        self._print(f"  [green]{msg}[/green]")
+
+    def warn(self, msg: str) -> None:
+        self._print(f"  [yellow]{msg}[/yellow]")
+
+    def error(self, msg: str) -> None:
+        self._print(f"  [red]{msg}[/red]")
+
+    def detail(self, msg: str) -> None:
+        if self._verbose:
+            self._print(f"  [dim]{msg}[/dim]")
 
     def truncate(self, text: str, max_width: int | None = None) -> str:
         """Truncate text with ellipsis at terminal width."""
-        w = max_width or self.width
+        w = max_width or self._width
         if len(text) <= w:
             return text
         return text[: w - 1] + "\u2026"
 
-    @staticmethod
-    def _status_style(value: str) -> str:
-        """Return rich style string for a status value."""
-        v = value.lower().replace(" ", "").replace("_", "")
-        if v in ("success", "ready", "clean", "passed", "none", "nothingtoccommit"):
-            return "green"
-        if v in ("failed", "needsmajorrevision"):
-            return "red"
-        if v in ("needsrevision", "issuesremaining"):
-            return "yellow"
-        return ""
+    def banner(self, title: str, fields: list[tuple[str, str]]) -> None:
+        """Print startup banner as a rich Panel."""
+        lines: list[str] = []
+        for label, value in fields:
+            lines.append(f"[cyan]{label + ':':<12}[/cyan] {value}")
+        body = "\n".join(lines)
+        panel = Panel(body, title=f"[bold]{title}[/bold]", border_style="blue", width=min(80, self._width))
+        self._console.print(panel)
 
-    @staticmethod
-    def _model_summary_rich(model: BaseModel, index: int = 0) -> str:
-        """Return a one-line summary for a nested model."""
-        if hasattr(model, "number") and hasattr(model, "name") and hasattr(model, "tasks"):
-            n_tasks = len(model.tasks) if hasattr(model, "tasks") else 0
-            return f"[bold]Phase {model.number}: {model.name}[/bold] ({n_tasks} tasks)"
-        if hasattr(model, "id") and hasattr(model, "group"):
-            return f"Task {model.id}: {model.name} \\[{model.group}]"
-        if hasattr(model, "severity") and hasattr(model, "description"):
-            tag = model.severity.upper()
-            desc = model.description[:80]
-            return f"\\[{tag}] {desc}"
-        return ""
-
-    def _format_model_fields(self, model: BaseModel, indent: int = 2) -> Text:
-        """Recursively format Pydantic model fields as rich Text."""
-        text = Text()
-        pad = " " * indent
-        for name, value in model:
-            display_name = name.replace("_", " ").title()
-            if isinstance(value, BaseModel):
-                text.append(f"{pad}  {display_name}:\n", style="cyan")
-                text.append(self._format_model_fields(value, indent + 4))
-            elif isinstance(value, list):
-                if not value:
-                    text.append(f"{pad}  ", style="")
-                    text.append(f"{display_name}:", style="cyan")
-                    text.append(" (none)\n")
-                elif all(isinstance(v, BaseModel) for v in value):
-                    text.append(f"{pad}  ", style="")
-                    text.append(f"{display_name}:", style="cyan")
-                    text.append(f" ({len(value)} items)\n")
-                    for i, item in enumerate(value):
-                        header = self._model_summary_rich(item, i)
-                        text.append(f"{pad}    ")
-                        text.append(f"[{i + 1}]", style="dim")
-                        text.append(" ")
-                        text.append_text(Text.from_markup(header))
-                        text.append("\n")
-                        text.append(self._format_model_fields(item, indent + 8))
-                else:
-                    text.append(f"{pad}  ", style="")
-                    text.append(f"{display_name}:", style="cyan")
-                    text.append(f" ({len(value)} items)\n")
-                    for item in value:
-                        text.append(f"{pad}    - {item}\n")
-            elif isinstance(value, str):
-                style = self._status_style(value)
-                if len(value) > 80:
-                    text.append(f"{pad}  ", style="")
-                    text.append(f"{display_name}:", style="cyan")
-                    text.append("\n")
-                    for line in _wrap_text(value, width=76 - indent):
-                        text.append(f"{pad}    {line}\n")
-                else:
-                    text.append(f"{pad}  ", style="")
-                    text.append(f"{display_name}:", style="cyan")
-                    text.append(" ")
-                    text.append(value, style=style)
-                    text.append("\n")
-            else:
-                text.append(f"{pad}  ", style="")
-                text.append(f"{display_name}:", style="cyan")
-                text.append(f" {value}\n")
-        return text
-
-    def result_panel(self, label: str, model: BaseModel) -> None:
-        """Render a Pydantic model as a rich Panel to stdout."""
-        body = self._format_model_fields(model)
-        panel = Panel(body, title=f"[bold]{label}[/bold]", border_style="dim", width=min(80, self.width))
-        self.stdout.print(panel)
+    def stage_header(self, text: str) -> None:
+        """Print a stage transition header."""
+        self._console.print()
+        self._console.rule(f"[bold]{text}[/bold]")
 
     def summary_table(
         self,
         title: str,
         rows: list[tuple[str, str, str]],
         footer: dict[str, str] | None = None,
+        total_elapsed: float | None = None,
     ) -> None:
-        """Render final summary as a rich Table in a Panel.
-
-        rows: list of (label, status_icon, detail)
-        footer: optional key-value pairs below the table
-        """
+        """Render final summary as a rich Table in a Panel."""
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column("Stage", style="cyan", min_width=14)
         table.add_column("Status")
         for label, icon, detail in rows:
             table.add_row(label, f"{icon}  {detail}")
-        if footer:
+        effective_footer = dict(footer) if footer else {}
+        if total_elapsed is not None:
+            minutes, seconds = divmod(total_elapsed, 60)
+            effective_footer["Elapsed"] = f"{int(minutes)}m {seconds:.1f}s"
+        if effective_footer:
             table.add_row("", "")
-            for k, v in footer.items():
+            for k, v in effective_footer.items():
                 table.add_row(k, v)
-        panel = Panel(table, title=f"[bold]{title}[/bold]", border_style="dim", width=min(80, self.width))
-        self.stdout.print(panel)
+        panel = Panel(table, title=f"[bold]{title}[/bold]", border_style="dim", width=min(80, self._width))
+        self._stdout.print(panel)
 
-    def stage_bar(self, current_key: str) -> None:
-        """Print a stage progress tracker bar."""
-        parts: list[str] = []
-        found = False
-        for key, label in _STAGES:
-            if key == current_key:
-                parts.append(f"[bold white on blue] {label} [/bold white on blue]")
-                found = True
-            elif not found:
-                parts.append(f"[green]{label}[/green]")
-            else:
-                parts.append(f"[dim]{label}[/dim]")
-        bar = " > ".join(parts)
-        self.console.print(bar)
+    @contextmanager
+    def activity(self, label: str, log_name: str, ring_max: int = 8) -> Iterator[StreamActivity]:
+        with self._lock:
+            if self._active is not None:
+                raise RuntimeError("Another activity is already active")
+            act = StreamActivity(
+                label=label,
+                log_path=self._log_dir / f"{log_name}.log",
+                ring_max=ring_max,
+                verbose=self._verbose,
+                _print=self._print,
+                _update_live=self._update_live,
+            )
+            self._active = act
+        self._start_live()
+        try:
+            yield act
+        finally:
+            try:
+                if not act._completed:
+                    act.complete("failed", f"{label} — interrupted")
+            finally:
+                act._close_log()
+                self._stop_live()
+                with self._lock:
+                    self._active = None
 
-    def banner(self, title: str, subtitle: str, fields: list[tuple[str, str]]) -> None:
-        """Print startup banner as a rich Panel."""
-        lines: list[str] = []
-        if subtitle:
-            lines.append(f"[dim]{subtitle}[/dim]")
-            lines.append("")
-        for label, value in fields:
-            lines.append(f"[cyan]{label + ':':<12}[/cyan] {value}")
-        body = "\n".join(lines)
-        panel = Panel(body, title=f"[bold]{title}[/bold]", border_style="blue", width=min(80, self.width))
-        self.console.print(panel)
+    @contextmanager
+    def quorum_activity(self, label: str, log_name: str, reviewer_count: int) -> Iterator[QuorumActivity]:
+        with self._lock:
+            if self._active is not None:
+                raise RuntimeError("Another activity is already active")
+            act = QuorumActivity(
+                label=label,
+                log_path=self._log_dir / f"{log_name}.log",
+                reviewer_count=reviewer_count,
+                verbose=self._verbose,
+                _print=self._print,
+                _update_live=self._update_live,
+            )
+            self._active = act
+        self._start_live()
+        try:
+            yield act
+        finally:
+            try:
+                if not act._completed:
+                    act.complete("failed", f"{label} — interrupted")
+            finally:
+                act._close_log()
+                self._stop_live()
+                with self._lock:
+                    self._active = None
 
-    def stage_header(self, text: str) -> None:
-        """Print a stage transition header."""
-        self.console.rule(f"[bold]{text}[/bold]")
+    def confirm(self, prompt: str) -> bool:
+        """Ask a yes/no question. Raises if an activity is active."""
+        if self._active is not None:
+            raise RuntimeError("Cannot confirm while an activity is active")
+        self._console.print(f"  {prompt} [dim](y/n)[/dim] ", end="")
+        answer = input().strip().lower()
+        return answer in ("y", "yes")
 
-    def info(self, msg: str) -> None:
-        """Print an informational message to stderr."""
-        self.console.print(f"  {msg}")
+    def collect_feedback(self, stage_name: str, *, is_initial_input: bool = False) -> str | None:
+        """Collect multiline feedback from the user.
 
-    def warn(self, msg: str) -> None:
-        """Print a warning to stderr."""
-        self.console.print(f"  [yellow]{msg}[/yellow]")
+        Returns stripped text or None if empty. EOF (Ctrl-D) is treated as empty.
+        """
+        if self._active is not None:
+            raise RuntimeError("Cannot collect feedback while an activity is active")
+        from prompt_toolkit import prompt as pt_prompt
 
-    def error(self, msg: str) -> None:
-        """Print an error to stderr."""
-        self.console.print(f"  [red]{msg}[/red]")
+        action = "provide input" if is_initial_input else "provide feedback"
+        self._console.print(f"\n  [bold]{stage_name}:[/bold] {action} (press [dim]Esc+Enter[/dim] to submit, [dim]Ctrl-D[/dim] to skip)")
+        try:
+            text = pt_prompt("  > ", multiline=True)
+        except EOFError:
+            return None
+        stripped = text.strip()
+        return stripped if stripped else None
 
-    def spinner_context(self, message: str) -> Console.status:
-        """Return a console.status() context manager for spinners."""
-        return self.console.status(f"  {message}", spinner="dots")
-
-
-display = Display()

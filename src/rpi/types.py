@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+Effort = Literal["low", "medium", "high"]
 
 
 @dataclass
 class Config:
     plan_path: Path | None = None
     min_score: int = 8  # threshold on 0-10 scale (ReviewResult.score / 2)
-    max_review_iters: int = 5
-    max_fix_iters: int = 5
+    max_review_iters: int = 3
+    max_fix_iters: int = 3
     review_quorum: int = 3  # number of parallel reviewers
     skip_plan_review: bool = False
     skip_implement: bool = False

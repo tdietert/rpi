@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..display import display
+from ..display import Display
 from ..process import run_claude_structured
 from . import Stage
 
@@ -30,7 +30,7 @@ def _dry_run_pr() -> PrResult:
     )
 
 
-def _run_push(dry_run: bool, worktree: str = "") -> bool:
+def _run_push(display: Display, dry_run: bool, worktree: str = "") -> bool:
     """Push the current branch to origin. Returns True on success."""
     if dry_run:
         display.info("[dim]\\[DRY RUN] git push -u origin HEAD[/dim]")
@@ -74,26 +74,21 @@ class PushPrStage(Stage):
 
         if config.push:
             if commit_result and commit_result.status == "failed":
-                display.stage_bar(self.name)
-                display.info("[dim]Stage 5: Push -- SKIPPED (commit failed)[/dim]")
+                ctx.display.info("[dim]Stage 5: Push -- SKIPPED (commit failed)[/dim]")
             else:
-                display.stage_bar(self.name)
-                display.stage_header("Stage 5: Push")
-                ctx.push_ok = _run_push(config.dry_run, config.worktree)
-                display.info(
+                ctx.display.stage_header("Stage 5: Push")
+                ctx.push_ok = _run_push(ctx.display, config.dry_run, config.worktree)
+                ctx.display.info(
                     f"[green]Stage 5 complete:[/green] {'success' if ctx.push_ok else 'failed'}"
                 )
                 ctx.progress.push_or_pr_done = True
                 self._snapshot(ctx)
         elif config.skip_pr:
-            display.stage_bar(self.name)
-            display.info("[dim]Stage 5: Create PR -- SKIPPED[/dim]")
+            ctx.display.info("[dim]Stage 5: Create PR -- SKIPPED[/dim]")
         elif commit_result and commit_result.status == "failed":
-            display.stage_bar(self.name)
-            display.info("[dim]Stage 5: Create PR -- SKIPPED (commit failed)[/dim]")
+            ctx.display.info("[dim]Stage 5: Create PR -- SKIPPED (commit failed)[/dim]")
         else:
-            display.stage_bar(self.name)
-            display.stage_header("Stage 5: Create PR")
+            ctx.display.stage_header("Stage 5: Create PR")
             pr_result = run_claude_structured(
                 prompt="Run /rpi-create-pr to create a GitHub PR for this branch.",
                 schema=PrResult,
@@ -103,9 +98,8 @@ class PushPrStage(Stage):
                 worktree=config.worktree,
                 dry_run_default=_dry_run_pr(),
             )
-            display.result_panel("Pull Request", pr_result)
-            display.info(f"[green]Stage 5 complete:[/green] {pr_result.status}")
+            ctx.display.info(f"PR: {pr_result.status} — {pr_result.pr_url}")
+            ctx.display.info(f"[green]Stage 5 complete:[/green] {pr_result.status}")
             ctx.pr_result = pr_result
             ctx.progress.push_or_pr_done = True
             self._snapshot(ctx)
-

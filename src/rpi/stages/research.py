@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from ..display import display
-from ..feedback import collect_feedback
 from ..process import run_claude_structured
 from ..research import Research, research_file_path, serialize_to_markdown
 from . import Stage
@@ -65,7 +63,6 @@ class ResearchStage(Stage):
             prompt=prompt,
             schema=Research,
             effort="high",
-            streaming=True,
             worktree=config.worktree,
             work_dir=ctx.work_dir,
             dry_run=config.dry_run,
@@ -82,12 +79,12 @@ class ResearchStage(Stage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md)
 
-        display.result_panel("Research", research)
-        display.info(f"Research written to: {path}")
+        ctx.display.info(f"Research complete: {research.title}")
+        ctx.display.info(f"Research written to: {path}")
 
         # Feedback loop
         while True:
-            feedback = collect_feedback("Research")
+            feedback = ctx.display.collect_feedback("Research")
             if feedback is None:
                 break
             # Build update prompt with current state + feedback
@@ -103,7 +100,6 @@ class ResearchStage(Stage):
                 prompt=update_prompt,
                 schema=Research,
                 effort="high",
-                streaming=True,
                 worktree=config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
@@ -111,8 +107,8 @@ class ResearchStage(Stage):
             )
             md = serialize_to_markdown(research, today)
             path.write_text(md)
-            display.result_panel("Research", research)
-            display.info(f"Research written to: {path}")
+            ctx.display.info(f"Research complete: {research.title}")
+            ctx.display.info(f"Research written to: {path}")
 
         ctx.research_path = path
         ctx.config.research_path = path

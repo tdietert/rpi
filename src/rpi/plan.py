@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from .display import display
+from .display import Display
 from .process import run_claude_structured
 from .types import Config
 
@@ -263,7 +263,7 @@ def plan_file_path(title: str, date: str) -> Path:
 
 
 
-def validate_plan(plan: Plan) -> list[str]:
+def validate_plan(plan: Plan, display: Display | None = None) -> list[str]:
     """Run cross-item semantic checks that Pydantic cannot express.
 
     Field presence, non-empty strings, and min-length lists are enforced
@@ -297,7 +297,7 @@ def validate_plan(plan: Plan) -> list[str]:
                         f"share files: {', '.join(sorted(overlap))}"
                     )
 
-        if not phase.verification_commands:
+        if not phase.verification_commands and display is not None:
             display.warn(
                 f"Phase {phase.number} ({phase.name}) has no "
                 "verification_commands \u2014 verification will be skipped for this phase"
@@ -339,7 +339,7 @@ def _dry_run_plan() -> Plan:
 
 
 def run_plan_processing(
-    config: Config, work_dir: Path
+    config: Config, work_dir: Path, display: Display
 ) -> Plan:
     """Parse the plan file into a structured representation.
 
@@ -373,17 +373,16 @@ def run_plan_processing(
         effort="low",
         work_dir=work_dir,
         dry_run=config.dry_run,
-        streaming=False,
         worktree=config.worktree,
         dry_run_default=_dry_run_plan(),
     )
 
-    display.result_panel("Parsed Plan", parsed)
+    display.info(f"Parsed Plan: {parsed.title} ({len(parsed.phases)} phases)")
 
     # Deterministic validation + auto-fix loop
     max_fix_attempts = 3
     for attempt in range(max_fix_attempts):
-        validation_errors = validate_plan(parsed)
+        validation_errors = validate_plan(parsed, display)
         if not validation_errors:
             display.info("[green]Plan structure validated.[/green]")
             return parsed
@@ -425,11 +424,10 @@ def run_plan_processing(
             effort="low",
             work_dir=work_dir,
             dry_run=config.dry_run,
-            streaming=False,
             worktree=config.worktree,
             dry_run_default=ApplyFeedbackResult(changes_applied=0, summary="(dry run)"),
         )
-        display.result_panel("Plan Structure Fix", fix_result)
+        display.info(f"Plan Structure Fix: {fix_result.changes_applied} changes — {fix_result.summary}")
 
         # Re-parse the modified plan
         display.info("Re-parsing fixed plan...")
@@ -456,11 +454,10 @@ def run_plan_processing(
             effort="low",
             work_dir=work_dir,
             dry_run=config.dry_run,
-            streaming=False,
             worktree=config.worktree,
             dry_run_default=_dry_run_plan(),
         )
-        display.result_panel("Re-parsed Plan", parsed)
+        display.info(f"Re-parsed Plan: {parsed.title} ({len(parsed.phases)} phases)")
 
     # Unreachable, but satisfies the type checker
     sys.exit(1)

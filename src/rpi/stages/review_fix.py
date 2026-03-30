@@ -5,8 +5,6 @@ from __future__ import annotations
 import sys
 
 from ..diagnosis import print_diagnosis, run_diagnosis
-from ..display import display
-from ..process import confirm
 from ..review import (
     IterationRecord,
     _apply_quorum_fix,
@@ -30,7 +28,7 @@ class ReviewFixStage(Stage):
         config = ctx.config
         work_dir = ctx.work_dir
 
-        display.stage_header(
+        ctx.display.stage_header(
             f"Stage 3: Review-Fix (target >= {config.min_score}/10, "
             f"max {config.max_fix_iters} iter)"
         )
@@ -39,8 +37,8 @@ class ReviewFixStage(Stage):
         history: list[IterationRecord] = []
 
         for iteration in range(1, config.max_fix_iters + 1):
-            display.console.rule(
-                f"[bold]Review-fix iteration {iteration}/{config.max_fix_iters}[/bold]"
+            ctx.display.stage_header(
+                f"Review-fix iteration {iteration}/{config.max_fix_iters}"
             )
 
             review_prompt = (
@@ -62,28 +60,29 @@ class ReviewFixStage(Stage):
                 work_dir=work_dir,
                 dry_run=config.dry_run,
                 worktree=config.worktree,
+                display=ctx.display,
             )
             result = quorum_result.aggregated
 
             score_10 = result.score // 2
             score_style = "green" if score_10 >= config.min_score else "yellow"
-            display.info(
+            ctx.display.info(
                 f"Score: [{score_style}]{score_10}/10[/{score_style}] ({result.score}/20), "
                 f"Verdict: {_derive_verdict(result)}"
             )
             if result.issues:
                 n_critical = sum(1 for i in result.issues if i.severity == "critical")
                 n_notes = sum(1 for i in result.issues if i.severity == "note")
-                display.info(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
+                ctx.display.info(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
                 for issue in result.issues[:5]:
-                    display.info(f"  - \\[{issue.severity.upper()}] {issue.description[:100]}")
+                    ctx.display.info(f"  - \\[{issue.severity.upper()}] {issue.description[:100]}")
                 if len(result.issues) > 5:
-                    display.info(f"  ... and {len(result.issues) - 5} more")
+                    ctx.display.info(f"  ... and {len(result.issues) - 5} more")
 
             # Apply fixes on both pass and fail paths
             apply_summary = ""
             if _has_feedback(quorum_result.per_reviewer):
-                display.info("Applying review fixes...")
+                ctx.display.info("Applying review fixes...")
                 apply_result = _apply_quorum_fix(
                     per_reviewer=quorum_result.per_reviewer,
                     quorum_size=config.review_quorum,
@@ -91,7 +90,7 @@ class ReviewFixStage(Stage):
                     dry_run=config.dry_run,
                     worktree=config.worktree,
                 )
-                display.result_panel("Applied Fix", apply_result)
+                ctx.display.info(f"Applied fix: {apply_result.changes_applied} changes — {apply_result.summary}")
                 apply_summary = f"{apply_result.changes_applied} fixes: {apply_result.summary}"
 
             history.append(IterationRecord(
@@ -103,7 +102,7 @@ class ReviewFixStage(Stage):
             _write_iteration_history(history, "review_fix", work_dir)
 
             if score_10 >= config.min_score and _derive_verdict(result) == "Ready":
-                display.info(
+                ctx.display.info(
                     f"[green]Review-fix passed:[/green] {score_10}/10 after {iteration} iteration(s)."
                 )
                 ctx.fix_status = "clean"
@@ -113,10 +112,10 @@ class ReviewFixStage(Stage):
 
             if iteration >= config.max_fix_iters:
                 # Loop exhausted -- run diagnosis before prompting user
-                display.warn(
+                ctx.display.warn(
                     f"Review-fix did not converge after {config.max_fix_iters} iterations (score: {score_10}/10)."
                 )
-                display.info("Running convergence diagnosis...")
+                ctx.display.info("Running convergence diagnosis...")
                 diagnosis = run_diagnosis(
                     history=history,
                     loop_type="review_fix",
@@ -125,10 +124,11 @@ class ReviewFixStage(Stage):
                     work_dir=work_dir,
                     dry_run=config.dry_run,
                     worktree=config.worktree,
+                    display=ctx.display,
                 )
-                print_diagnosis(diagnosis, "review_fix")
-                if not confirm("  Proceed to commit+PR anyway? (y/n): "):
-                    display.info("Stopped.")
+                print_diagnosis(diagnosis, "review_fix", display=ctx.display)
+                if not ctx.display.confirm("Proceed to commit+PR anyway?"):
+                    ctx.display.info("Stopped.")
                     sys.exit(1)
 
                 ctx.fix_status = "issues_remaining"
@@ -140,7 +140,7 @@ class ReviewFixStage(Stage):
             ctx.fix_score = score_10
             ctx.fix_iters = config.max_fix_iters
 
-        display.info(
+        ctx.display.info(
             f"[green]Stage 3 complete:[/green] score {ctx.fix_score}/10 "
             f"after {ctx.fix_iters} iteration(s)"
         )
@@ -152,9 +152,8 @@ class ReviewFixStage(Stage):
         )
 
     def execute(self, ctx) -> None:
-        display.stage_bar(self.name)
         if self.should_skip(ctx):
-            display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
+            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
             return
         self.run(ctx)
         self._snapshot(ctx)

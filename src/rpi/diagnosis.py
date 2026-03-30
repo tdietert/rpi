@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .display import _wrap_text, display
+from .display import Display, _wrap_text
 from .process import run_claude_structured
 from .review import IterationRecord, _format_iteration_history
 
@@ -144,6 +144,7 @@ def run_diagnosis(
     work_dir: Path,
     dry_run: bool,
     worktree: str = "",
+    display: Display | None = None,
 ) -> DiagnosisResult | None:
     """Run the rpi-diagnosis skill to analyze why a loop didn't converge."""
     history_text = _format_iteration_history(history, loop_type)
@@ -174,7 +175,8 @@ def run_diagnosis(
     except (SystemExit, KeyboardInterrupt):
         raise
     except Exception as e:
-        display.error(f"Diagnosis failed: {e}")
+        if display is not None:
+            display.error(f"Diagnosis failed: {e}")
         return None
 
 
@@ -217,13 +219,15 @@ def _write_diagnosis_file(diagnosis: DiagnosisResult, loop_type: str) -> Path:
     return path
 
 
-def print_diagnosis(diagnosis: DiagnosisResult | None, loop_type: str) -> None:
+def print_diagnosis(diagnosis: DiagnosisResult | None, loop_type: str, display: Display | None = None) -> None:
     """Print a formatted diagnosis to the terminal and write it to a file."""
     if diagnosis is None:
         return
-    display.result_panel("Convergence Diagnosis", diagnosis)
+    if display is not None:
+        display.info(f"Convergence Diagnosis: {diagnosis.pattern} — {diagnosis.summary}")
     path = _write_diagnosis_file(diagnosis, loop_type)
-    display.info(f"Diagnosis written to: {path}")
+    if display is not None:
+        display.info(f"Diagnosis written to: {path}")
 
 
 
@@ -237,6 +241,7 @@ def triage_verification_failure(
     dry_run: bool = False,
     worktree: str = "",
     implementer_verification: str = "",
+    display: Display | None = None,
 ) -> VerificationTriageResult | None:
     """Quick triage: is the verification command itself broken, or is the code wrong?"""
     worktree_context = ""
@@ -304,7 +309,6 @@ def triage_verification_failure(
             effort="low",
             work_dir=work_dir,
             dry_run=dry_run,
-            streaming=False,
             worktree=worktree,
             model="haiku",
             dry_run_default=_dry_run_triage(),
@@ -312,7 +316,8 @@ def triage_verification_failure(
     except (SystemExit, KeyboardInterrupt):
         raise
     except Exception as e:
-        display.error(f"Triage failed: {e}")
+        if display is not None:
+            display.error(f"Triage failed: {e}")
         return None
 
 
@@ -324,6 +329,7 @@ def run_verification_fix(
     work_dir: Path | None = None,
     dry_run: bool = False,
     worktree: str = "",
+    display: Display | None = None,
 ) -> VerificationFixResult | None:
     """Spawn a lightweight fixer agent to resolve a verification failure."""
     prompt = (
@@ -343,14 +349,14 @@ def run_verification_fix(
             effort="medium",
             work_dir=work_dir,
             dry_run=dry_run,
-            streaming=True,
             worktree=worktree,
             dry_run_default=_dry_run_fix(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise
     except Exception as e:
-        display.error(f"Verification fix failed: {e}")
+        if display is not None:
+            display.error(f"Verification fix failed: {e}")
         return None
 
 
@@ -361,6 +367,7 @@ def run_implementation_diagnosis(
     work_dir: Path,
     dry_run: bool,
     worktree: str = "",
+    display: Display | None = None,
 ) -> ImplementationDiagnosisResult | None:
     """Run Claude to diagnose why a phase's triage-fix loop didn't resolve."""
     attempt_details = []
@@ -401,14 +408,14 @@ def run_implementation_diagnosis(
             effort="medium",
             work_dir=work_dir,
             dry_run=dry_run,
-            streaming=False,
             worktree=worktree,
             dry_run_default=_dry_run_impl_diagnosis(),
         )
     except (SystemExit, KeyboardInterrupt):
         raise
     except Exception as e:
-        display.error(f"Diagnosis failed: {e}")
+        if display is not None:
+            display.error(f"Diagnosis failed: {e}")
         return None
 
 
@@ -451,10 +458,13 @@ def _write_implementation_diagnosis_file(
 def print_implementation_diagnosis(
     diagnosis: ImplementationDiagnosisResult | None,
     phase_num: int,
+    display: Display | None = None,
 ) -> None:
     """Print and write an implementation phase diagnosis."""
     if diagnosis is None:
         return
-    display.result_panel(f"Phase {phase_num} Verification Diagnosis", diagnosis)
+    if display is not None:
+        display.info(f"Phase {phase_num} Verification Diagnosis: {diagnosis.root_cause}")
     path = _write_implementation_diagnosis_file(diagnosis, phase_num)
-    display.info(f"Diagnosis written to: {path}")
+    if display is not None:
+        display.info(f"Diagnosis written to: {path}")

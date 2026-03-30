@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..display import display
+from ..display import Display
 from ..plan import Plan, PlanMetadata
 from ..research import Research
 from ..snapshot import SnapshotStageProgress, save_snapshot
@@ -21,6 +21,7 @@ class PipelineContext:
     work_dir: Path
     snap_dir: Path | None
     progress: SnapshotStageProgress
+    display: Display
     meta: PlanMetadata | None = None
     plan: Plan | None = None
     review_score: int | None = None
@@ -47,11 +48,10 @@ class Stage(ABC):
     def run(self, ctx: PipelineContext) -> None: ...
 
     def execute(self, ctx: PipelineContext) -> None:
-        display.stage_bar(self.name)
         if self.should_skip(ctx):
-            display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
+            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
             return
-        display.stage_header(self.label)
+        ctx.display.stage_header(self.label)
         self.run(ctx)
         self._snapshot(ctx)
 
@@ -60,7 +60,7 @@ class Stage(ABC):
             save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)
 
 
-def print_summary(ctx: PipelineContext) -> None:
+def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -> None:
     """Print a formatted run summary."""
     config = ctx.config
     meta = ctx.meta
@@ -141,7 +141,7 @@ def print_summary(ctx: PipelineContext) -> None:
     if config.worktree:
         footer["Worktree"] = config.worktree
 
-    display.summary_table(f"Summary  {meta.title if meta else 'RPI Run'}", rows, footer or None)
+    ctx.display.summary_table(f"Summary  {meta.title if meta else 'RPI Run'}", rows, footer or None, total_elapsed=total_elapsed)
 
 
 # Re-export stage classes for convenience

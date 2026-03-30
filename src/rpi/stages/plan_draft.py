@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from ..display import display
-from ..feedback import collect_feedback
 from ..plan import (
     Plan,
     PlanMetadata,
@@ -103,7 +101,6 @@ class PlanDraftStage(Stage):
             prompt=prompt,
             schema=Plan,
             effort="high",
-            streaming=True,
             worktree=config.worktree,
             work_dir=ctx.work_dir,
             dry_run=config.dry_run,
@@ -124,12 +121,12 @@ class PlanDraftStage(Stage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md)
 
-        display.result_panel("Plan", plan)
-        display.info(f"Plan written to: {path}")
+        ctx.display.info(f"Plan: {plan.title} ({len(plan.phases)} phases)")
+        ctx.display.info(f"Plan written to: {path}")
 
         # Feedback loop
         while True:
-            feedback = collect_feedback("Plan")
+            feedback = ctx.display.collect_feedback("Plan")
             if feedback is None:
                 break
             update_prompt = (
@@ -144,7 +141,6 @@ class PlanDraftStage(Stage):
                 prompt=update_prompt,
                 schema=Plan,
                 effort="high",
-                streaming=True,
                 worktree=config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
@@ -153,8 +149,8 @@ class PlanDraftStage(Stage):
             plan = self._validate_with_fix(plan, ctx)
             md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str)
             path.write_text(md)
-            display.result_panel("Plan", plan)
-            display.info(f"Plan written to: {path}")
+            ctx.display.info(f"Plan: {plan.title} ({len(plan.phases)} phases)")
+            ctx.display.info(f"Plan written to: {path}")
 
         # Set context for downstream stages
         ctx.plan = plan
@@ -172,18 +168,18 @@ class PlanDraftStage(Stage):
         for attempt in range(max_attempts):
             errors = validate_plan(plan)
             if not errors:
-                display.info("[green]Plan structure validated.[/green]")
+                ctx.display.info("[green]Plan structure validated.[/green]")
                 return plan
 
-            display.warn("Plan structure validation found issues:")
+            ctx.display.warn("Plan structure validation found issues:")
             for err in errors:
-                display.info(f"  - {err}")
+                ctx.display.info(f"  - {err}")
 
             if attempt >= max_attempts - 1:
-                display.warn("Could not auto-fix all plan issues after 3 attempts.")
+                ctx.display.warn("Could not auto-fix all plan issues after 3 attempts.")
                 return plan
 
-            display.info(f"Fixing plan structure (attempt {attempt + 1}/{max_attempts})...")
+            ctx.display.info(f"Fixing plan structure (attempt {attempt + 1}/{max_attempts})...")
             fix_prompt = (
                 f"{_PLAN_SYSTEM}\n\n"
                 f"## Current Plan\n\n{plan.model_dump_json(indent=2)}\n\n"
@@ -198,7 +194,6 @@ class PlanDraftStage(Stage):
                 prompt=fix_prompt,
                 schema=Plan,
                 effort="low",
-                streaming=False,
                 worktree=ctx.config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=ctx.config.dry_run,
