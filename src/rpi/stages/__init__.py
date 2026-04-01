@@ -9,7 +9,6 @@ from typing import Any
 
 from ..display import Display
 from ..plan import Plan, PlanMetadata
-from ..research import Research
 from ..snapshot import save_snapshot
 from ..types import Config, SnapshotStageProgress
 
@@ -34,7 +33,7 @@ class PipelineContext:
     pr_result: Any = None  # PrResult
     resume_completed_phases: set[int] = field(default_factory=set)
     research_path: Path | None = None
-    research: Research | None = None
+    spec_path: Path | None = None
 
 
 class Stage(ABC):
@@ -80,6 +79,14 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
         rows.append(("Research", icon(True), "done"))
     elif not ctx.config.skip_research:
         rows.append(("Research", "", "in progress"))
+
+    # Spec Draft
+    if ctx.config.skip_spec or ctx.config.plan_path is not None or ctx.config.spec_path is not None:
+        rows.append(("Spec Draft", "", skip_label()))
+    elif ctx.progress.spec_draft_done:
+        rows.append(("Spec Draft", icon(True), "done"))
+    elif not ctx.config.skip_spec:
+        rows.append(("Spec Draft", "", "in progress"))
 
     # Plan Draft
     if ctx.config.plan_path is not None and not ctx.progress.plan_draft_done:
@@ -153,6 +160,7 @@ from .preflight import PreflightStage
 from .push_pr import PushPrStage
 from .research import ResearchStage
 from .review_fix import ReviewFixStage
+from .spec_draft import SpecDraftStage
 
 __all__ = [
     "CommitStage",
@@ -164,6 +172,7 @@ __all__ = [
     "PushPrStage",
     "ResearchStage",
     "ReviewFixStage",
+    "SpecDraftStage",
     "Stage",
     "print_summary",
 ]

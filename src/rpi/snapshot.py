@@ -20,7 +20,7 @@ _V1_CONFIG_FIELDS = {
     "plan_path", "min_score", "max_review_iters", "max_fix_iters",
     "review_quorum", "skip_plan_review", "skip_implement", "skip_fix",
     "skip_commit", "skip_pr", "push", "worktree", "dry_run", "prompt",
-    "skip_research", "research_path",
+    "skip_research", "research_path", "skip_spec", "spec_path",
 }
 
 
@@ -47,7 +47,7 @@ class Snapshot(BaseModel):
             if key in data:
                 val = data.pop(key)
                 # v1 stored paths as strings; convert empty strings to None
-                if key in ("plan_path", "research_path"):
+                if key in ("plan_path", "research_path", "spec_path"):
                     val = val if val else None
                 config_data[key] = val
         data["config"] = config_data
@@ -171,6 +171,8 @@ def restore_from_snapshot(
     # Set skip flags for completed new stages
     if snapshot.progress.research_done:
         config.skip_research = True
+    if snapshot.progress.spec_draft_done:
+        config.skip_spec = True
 
     # Verify worktree still exists on disk
     if config.worktree and not Path(config.worktree).is_dir():

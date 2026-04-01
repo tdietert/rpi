@@ -46,6 +46,7 @@ from .stages import (
     PushPrStage,
     ResearchStage,
     ReviewFixStage,
+    SpecDraftStage,
     print_summary,
 )
 from .types import Config, SnapshotStageProgress
@@ -97,7 +98,10 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="RPI: Review-Plan-Implement-Fix automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Environment variables: MIN_SCORE, MAX_REVIEW_ITERS, MAX_FIX_ITERS, "
+        epilog="Subcommands:\n"
+        "  rpi install-skills [--force]   Install skills to ~/.claude/skills/ (symlinks)\n"
+        "  rpi uninstall-skills            Remove installed skill symlinks\n\n"
+        "Environment variables: MIN_SCORE, MAX_REVIEW_ITERS, MAX_FIX_ITERS, "
         "REVIEW_QUORUM, SKIP_PLAN_REVIEW, SKIP_IMPLEMENT, SKIP_FIX, SKIP_COMMIT, SKIP_PR, PUSH, WORKTREE, DRY_RUN",
     )
     parser.add_argument("plan_path", type=Path, nargs="?", default=None, help="Path to the plan file")
@@ -121,6 +125,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", type=str, default=None, help="Task description — starts from research stage instead of requiring a plan file")
     parser.add_argument("--research", type=Path, default=None, help="Existing research file — skips research stage")
     parser.add_argument("--skip-research", action="store_true", default=False, help="Skip the research stage (go straight to plan draft)")
+    parser.add_argument("--skip-spec", action="store_true", default=False, help="Skip the spec stage (go straight from research to plan draft)")
+    parser.add_argument("--spec", type=Path, default=None, help="Existing spec file -- skips spec stage")
     parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose output (show streaming details)")
     return parser.parse_args()
 
@@ -148,6 +154,8 @@ def _list_snapshots() -> None:
             stages = []
             if p.research_done:
                 stages.append("research")
+            if p.spec_draft_done:
+                stages.append("spec-draft")
             if p.plan_draft_done:
                 stages.append("plan-draft")
             if p.plan_review_done:
@@ -269,6 +277,8 @@ def _build_config(args: argparse.Namespace, prompt: str, worktree_path: str) -> 
         prompt=prompt,
         skip_research=args.skip_research or (args.research is not None),
         research_path=args.research.resolve() if args.research else None,
+        skip_spec=args.skip_spec or (args.spec is not None),
+        spec_path=args.spec.resolve() if args.spec else None,
     )
 
 
@@ -296,6 +306,8 @@ def _render_banner(
         completed_stages = []
         if progress.research_done:
             completed_stages.append("research")
+        if progress.spec_draft_done:
+            completed_stages.append("spec-draft")
         if progress.plan_draft_done:
             completed_stages.append("plan-draft")
         if progress.plan_review_done:
@@ -327,6 +339,8 @@ def _render_banner(
         ]
         if config.research_path:
             fields.append(("Research", str(config.research_path)))
+        if config.spec_path:
+            fields.append(("Spec", str(config.spec_path)))
 
     if progress is None:
         # Fresh-run extras
@@ -335,6 +349,7 @@ def _render_banner(
         skips = [
             name
             for name, flag in [
+                ("spec", config.skip_spec),
                 ("plan-review", config.skip_plan_review),
                 ("implement", config.skip_implement),
                 ("fix", config.skip_fix),
@@ -379,6 +394,8 @@ def _run() -> None:
         # Set skip flags for completed stages
         if progress.research_done:
             config.skip_research = True
+        if progress.spec_draft_done:
+            config.skip_spec = True
         if progress.plan_review_done:
             config.skip_plan_review = True
         if progress.implementation_done:
@@ -458,11 +475,14 @@ def _run() -> None:
 
     if config.research_path:
         ctx.research_path = config.research_path
+    if config.spec_path:
+        ctx.spec_path = config.spec_path
 
     _run_state.plan = plan
 
     stages = [
         ResearchStage(),
+        SpecDraftStage(),
         PlanDraftStage(),
         PreflightStage(),
         PlanReviewStage(),
@@ -480,7 +500,38 @@ def _run() -> None:
     print_summary(ctx, total_elapsed=elapsed)
 
 
+def _handle_subcommands() -> bool:
+    """Check for subcommands that bypass the normal pipeline. Returns True if handled."""
+    if len(sys.argv) < 2:
+        return False
+
+    cmd = sys.argv[1]
+    console = Console()
+
+    if cmd == "install-skills":
+        from .skills import install_skills
+
+        force = "--force" in sys.argv[2:]
+        console.print("[bold]Installing RPI skills...[/bold]")
+        for msg in install_skills(force=force):
+            console.print(msg)
+        console.print("[green]Done.[/green]")
+        sys.exit(0)
+
+    if cmd == "uninstall-skills":
+        from .skills import uninstall_skills
+
+        console.print("[bold]Uninstalling RPI skills...[/bold]")
+        for msg in uninstall_skills():
+            console.print(msg)
+        console.print("[green]Done.[/green]")
+        sys.exit(0)
+
+    return False
+
+
 def main() -> None:
+    _handle_subcommands()
     signal.signal(signal.SIGINT, sigint_handler)
     try:
         _run()

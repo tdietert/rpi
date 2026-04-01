@@ -49,13 +49,21 @@ class PlanDraftStage(Stage):
         config = ctx.config
         today = date.today().isoformat()
 
-        # Gather context
+        # Gather context: prefer spec over raw research
+        spec_content = ""
+        if ctx.spec_path and ctx.spec_path.is_file():
+            spec_content = ctx.spec_path.read_text()
+
         research_content = ""
-        if ctx.research_path and ctx.research_path.is_file():
+        if not spec_content and ctx.research_path and ctx.research_path.is_file():
             research_content = ctx.research_path.read_text()
 
         # Build plan prompt
         parts = [_PLAN_SYSTEM, ""]
+        if spec_content:
+            parts.append("## Spec Context\n")
+            parts.append(spec_content)
+            parts.append("")
         if research_content:
             parts.append("## Research Context\n")
             parts.append(research_content)
@@ -81,7 +89,8 @@ class PlanDraftStage(Stage):
 
         # Serialize and write
         research_path_str = str(ctx.research_path) if ctx.research_path else None
-        md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str)
+        spec_path_str = str(ctx.spec_path) if ctx.spec_path else None
+        md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str, spec_path_str)
         rel_path = plan_file_path(plan.title, today)
         if config.worktree:
             path = Path(config.worktree) / rel_path
@@ -117,7 +126,7 @@ class PlanDraftStage(Stage):
                 )
                 act.complete("success", f"{plan.title} ({len(plan.phases)} phases)")
             plan = self._validate_with_fix(plan, ctx)
-            md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str)
+            md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str, spec_path_str)
             path.write_text(md)
             ctx.display.info(f"Plan written to: {path}")
 

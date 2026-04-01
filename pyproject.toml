@@ -17,6 +17,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rpi"]
+artifacts = [".claude/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -166,6 +166,7 @@ def serialize_plan_to_markdown(
     task_description: str,
     date: str,
     research_path: str | None = None,
+    spec_path: str | None = None,
 ) -> str:
     """Serialize a Plan object to markdown matching the format validate_plan_file() expects."""
     lines: list[str] = []
@@ -174,6 +175,8 @@ def serialize_plan_to_markdown(
     lines.append("---")
     lines.append(f"date: {date}")
     lines.append(f'task: "{task_description}"')
+    if spec_path is not None:
+        lines.append(f"spec: {spec_path}")
     if research_path is not None:
         lines.append(f"research: {research_path}")
     lines.append("status: draft")

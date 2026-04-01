@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from .display import Display, StreamActivity
+from .skills import ADD_DIR_PATH
 from .types import Effort
 
 T = TypeVar("T", bound=BaseModel)
@@ -292,6 +293,8 @@ def start_claude(
         "--dangerously-skip-permissions",
         "--settings",
         json.dumps({"outputStyle": ""}),
+        "--add-dir",
+        str(ADD_DIR_PATH),
     ]
     if json_schema_str is not None:
         cmd.extend(["--json-schema", json_schema_str])
@@ -458,6 +461,8 @@ def start_quorum(
         "--dangerously-skip-permissions",
         "--settings",
         json.dumps({"outputStyle": ""}),
+        "--add-dir",
+        str(ADD_DIR_PATH),
     ]
     if json_schema_str is not None:
         cmd.extend(["--json-schema", json_schema_str])

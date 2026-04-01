@@ -1,30 +1,22 @@
-"""Research stage: explore codebase and produce structured research output."""
+"""Research stage: invoke /rpi-research skill and collect feedback."""
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from ..process import run_claude_structured
-from ..research import Research, research_file_path, serialize_to_markdown
 from . import Stage
 
-_RESEARCH_SYSTEM = (
-    "You are researching a codebase to document what exists. "
-    "Your job is to explore, understand, and report — not to suggest changes. "
-    "Use your tools (Read, Glob, Grep, Bash) to thoroughly investigate."
-)
 
-_RESEARCH_INSTRUCTIONS = """\
-Decompose the research question into 3-6 areas and investigate each thoroughly:
-- Read relevant source files, configs, and tests
-- Document file paths with line references (e.g. src/foo.py:42)
-- Describe architecture and data flow between components
-- Note patterns and conventions used in the codebase
-- List open questions or ambiguities that may need human input
-
-Fill in ALL fields of the Research schema with detailed, accurate information \
-from your codebase exploration."""
+class ResearchResult(BaseModel):
+    status: Literal["success", "failed"]
+    research_path: str = Field(description="Path to the research file written")
+    title: str = Field(description="Research topic name")
+    summary: str = Field(description="One-line summary of findings")
+    errors: str = Field(description="Any errors encountered, or 'None'")
 
 
 class ResearchStage(Stage):
@@ -36,37 +28,27 @@ class ResearchStage(Stage):
 
     def run(self, ctx) -> None:
         config = ctx.config
-        today = date.today().isoformat()
-
-        # Build research prompt
         prompt = (
-            f"{_RESEARCH_SYSTEM}\n\n"
-            f"## Research Query\n\n{config.prompt}\n\n"
-            f"## Instructions\n\n{_RESEARCH_INSTRUCTIONS}"
+            f"Run /rpi-research to research the following:\n\n"
+            f"{config.prompt}"
         )
 
         with ctx.display.activity("Research", "research") as act:
-            research = run_claude_structured(
+            result = run_claude_structured(
                 prompt=prompt,
-                schema=Research,
+                schema=ResearchResult,
                 effort="high",
                 worktree=config.worktree,
                 work_dir=ctx.work_dir,
                 dry_run=config.dry_run,
                 activity=act,
             )
-            act.complete("success", research.title)
+            act.complete(
+                "success" if result.status == "success" else "failed",
+                result.title,
+            )
 
-        # Serialize and write
-        md = serialize_to_markdown(research, today)
-        rel_path = research_file_path(research.title, today)
-        if config.worktree:
-            path = Path(config.worktree) / rel_path
-        else:
-            path = rel_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(md)
-
+        path = Path(result.research_path)
         ctx.display.info(f"Research written to: {path}")
 
         # Feedback loop
@@ -74,31 +56,29 @@ class ResearchStage(Stage):
             feedback = ctx.display.collect_feedback("Research")
             if feedback is None:
                 break
-            # Build update prompt with current state + feedback
             update_prompt = (
-                f"{_RESEARCH_SYSTEM}\n\n"
-                f"## Current Research\n\n{research.model_dump_json(indent=2)}\n\n"
+                f"Run /rpi-research to update the research at {path}.\n\n"
                 f"## Feedback\n\n{feedback}\n\n"
-                f"## Instructions\n\nUpdate the research based on the feedback above. "
-                f"Re-investigate as needed using your tools. "
-                f"Fill in ALL fields of the Research schema."
+                "Read the existing research file, then update it based on the "
+                "feedback above. Re-investigate as needed."
             )
             with ctx.display.activity("Research (update)", "research-update") as act:
-                research = run_claude_structured(
+                result = run_claude_structured(
                     prompt=update_prompt,
-                    schema=Research,
+                    schema=ResearchResult,
                     effort="high",
                     worktree=config.worktree,
                     work_dir=ctx.work_dir,
                     dry_run=config.dry_run,
                     activity=act,
                 )
-                act.complete("success", research.title)
-            md = serialize_to_markdown(research, today)
-            path.write_text(md)
-            ctx.display.info(f"Research written to: {path}")
+                act.complete(
+                    "success" if result.status == "success" else "failed",
+                    result.title,
+                )
+            path = Path(result.research_path)
+            ctx.display.info(f"Research updated: {path}")
 
         ctx.research_path = path
         ctx.config.research_path = path
-        ctx.research = research
         ctx.progress.research_done = True

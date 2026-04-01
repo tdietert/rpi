@@ -106,6 +106,8 @@ class Config(BaseModel):
     prompt: str = ""
     skip_research: bool = False
     research_path: Path | None = None
+    skip_spec: bool = False
+    spec_path: Path | None = None
 
 
 class SnapshotPhaseProgress(BaseModel):
@@ -131,4 +133,5 @@ class SnapshotStageProgress(BaseModel):
     commit_done: bool = False
     push_or_pr_done: bool = False
     research_done: bool = False
+    spec_draft_done: bool = False
     plan_draft_done: bool = False
