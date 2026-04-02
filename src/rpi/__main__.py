@@ -4,9 +4,10 @@ Orchestrates plan-review, implement, and review-fix loops by calling
 the Claude CLI with structured JSON responses via --json-schema.
 
 Usage:
-    rpi <plan-file>
-    rpi .claude/plans/2026-03-08-my-feature.md
-    DRY_RUN=1 rpi <plan-file>
+    rpi --prompt "build the feature"
+    rpi --plan .claude/plans/2026-03-08-my-feature.md
+    rpi --spec spec.md --prompt "build the feature"
+    DRY_RUN=1 rpi --prompt "build the feature"
 """
 
 from __future__ import annotations
@@ -27,29 +28,24 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from .config import Config
 from .display import Display
 from .plan import Plan, PlanMetadata, parse_plan_metadata, validate_plan_file
 from .process import cleanup_children, sigint_handler
+from .progress import SnapshotStageProgress
 from .snapshot import (
     create_snapshot_dir,
     load_snapshot,
     restore_from_snapshot,
     save_snapshot,
 )
+from .stage_name import StageName
 from .stages import (
-    CommitStage,
-    ImplementStage,
+    PIPELINE,
     PipelineContext,
-    PlanDraftStage,
-    PlanReviewStage,
-    PreflightStage,
-    PushPrStage,
-    ResearchStage,
-    ReviewFixStage,
-    SpecDraftStage,
     print_summary,
+    skips_stage,
 )
-from .types import Config, SnapshotStageProgress
 
 
 @dataclass
@@ -104,7 +100,7 @@ def _parse_args() -> argparse.Namespace:
         "Environment variables: MIN_SCORE, MAX_REVIEW_ITERS, MAX_FIX_ITERS, "
         "REVIEW_QUORUM, SKIP_PLAN_REVIEW, SKIP_IMPLEMENT, SKIP_FIX, SKIP_COMMIT, SKIP_PR, PUSH, WORKTREE, DRY_RUN",
     )
-    parser.add_argument("plan_path", type=Path, nargs="?", default=None, help="Path to the plan file")
+    parser.add_argument("--plan", type=Path, dest="plan_path", default=None, help="Path to an existing plan file (starts at plan review)")
     parser.add_argument("--min-score", type=int, default=None, help="Minimum review score (0-10, default: 8)")
     parser.add_argument("--max-review-iters", type=int, default=None, help="Max plan review iterations (default: 3)")
     parser.add_argument("--max-fix-iters", type=int, default=None, help="Max review-fix iterations (default: 3)")
@@ -122,11 +118,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", default=None, help="Print commands without executing")
     parser.add_argument("--resume", type=Path, default=None, help="Resume from a snapshot directory (e.g. ~/.claude/snapshots/rpi-my-feature-20260322-143000)")
     parser.add_argument("--list-snapshots", action="store_true", default=False, help="List available snapshots and exit")
-    parser.add_argument("--prompt", type=str, default=None, help="Task description — starts from research stage instead of requiring a plan file")
-    parser.add_argument("--research", type=Path, default=None, help="Existing research file — skips research stage")
-    parser.add_argument("--skip-research", action="store_true", default=False, help="Skip the research stage (go straight to plan draft)")
-    parser.add_argument("--skip-spec", action="store_true", default=False, help="Skip the spec stage (go straight from research to plan draft)")
-    parser.add_argument("--spec", type=Path, default=None, help="Existing spec file -- skips spec stage")
+    parser.add_argument("--prompt", type=str, default=None, help="Task description (optional additional context when used with --plan)")
+    parser.add_argument("--research", type=Path, default=None, help="Existing research file (skips research stage)")
+    parser.add_argument("--spec", type=Path, default=None, help="Existing spec file (skips research + spec stages)")
     parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose output (show streaming details)")
     return parser.parse_args()
 
@@ -180,14 +174,25 @@ def _list_snapshots() -> None:
 
 
 def _collect_prompt(args: argparse.Namespace, disp: Display) -> str:
-    """Resolve prompt from args or interactive input."""
+    """Resolve prompt from args or interactive input.
+
+    Prompt is optional when an upstream artifact (--plan, --spec, or
+    --research) is provided, since those artifacts already contain the
+    task context.
+    """
     prompt = args.prompt or ""
-    if args.plan_path is None and not prompt:
+    has_artifact = (
+        args.plan_path is not None
+        or args.spec is not None
+        or args.research is not None
+    )
+    if not has_artifact and not prompt:
         prompt = disp.collect_feedback("Task description", is_initial_input=True) or ""
         if not prompt:
             disp.error(
                 "No task description provided. Usage:\n"
-                "  rpi <plan-file>          # run with existing plan\n"
+                "  rpi --plan <plan-file>   # run with existing plan\n"
+                "  rpi --spec <spec-file>   # start from plan draft\n"
                 "  rpi --prompt \"...\"        # start from research\n"
                 "  rpi                       # interactive mode"
             )
@@ -231,12 +236,18 @@ def _create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> st
         slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-")
         if not slug:
             slug = f"rpi-{ts}"
-    else:
+    elif prompt:
         words = prompt.split()[:4]
         slug = "-".join(words) if words else ""
         slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-")
         if not slug:
             slug = f"rpi-{ts}"
+    elif args.spec is not None:
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "-", args.spec.stem).strip("-") or f"rpi-{ts}"
+    elif args.research is not None:
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "-", args.research.stem).strip("-") or f"rpi-{ts}"
+    else:
+        slug = f"rpi-{ts}"
 
     branch_name = f"rpi/{slug}"
     base_branch = args.worktree_base or "main"
@@ -253,6 +264,28 @@ def _create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> st
     return str(worktree_dir)
 
 
+# "If this arg has a value, the user provided the output of this stage"
+_ARG_STAGE_OUTPUT: dict[str, StageName] = {
+    "plan_path":     StageName.plan_draft,
+    "spec":          StageName.spec_draft,
+    "research":      StageName.research,
+}
+
+
+def _resolve_start_from(args: argparse.Namespace) -> StageName:
+    """Determine which stage to start from based on artifact args."""
+    provided = [
+        stage for attr, stage in _ARG_STAGE_OUTPUT.items()
+        if getattr(args, attr, None) is not None
+    ]
+    if not provided:
+        return StageName.research
+    stage_order = [S.name for S in PIPELINE]
+    best = max(provided, key=lambda s: stage_order.index(s))
+    idx = stage_order.index(best)
+    return stage_order[idx + 1] if idx + 1 < len(stage_order) else stage_order[-1]
+
+
 def _build_config(args: argparse.Namespace, prompt: str, worktree_path: str) -> Config:
     """Construct Config with CLI flags overriding env-var defaults."""
     push = (
@@ -266,6 +299,7 @@ def _build_config(args: argparse.Namespace, prompt: str, worktree_path: str) -> 
         max_review_iters=args.max_review_iters or int(os.environ.get("MAX_REVIEW_ITERS", "3")),
         max_fix_iters=args.max_fix_iters or int(os.environ.get("MAX_FIX_ITERS", "3")),
         review_quorum=args.quorum or int(os.environ.get("REVIEW_QUORUM", "3")),
+        start_from=_resolve_start_from(args),
         skip_plan_review=args.skip_plan_review if args.skip_plan_review is not None else os.environ.get("SKIP_PLAN_REVIEW", "0") == "1",
         skip_implement=args.skip_implement if args.skip_implement is not None else os.environ.get("SKIP_IMPLEMENT", "0") == "1",
         skip_fix=args.skip_fix if args.skip_fix is not None else os.environ.get("SKIP_FIX", "0") == "1",
@@ -275,9 +309,7 @@ def _build_config(args: argparse.Namespace, prompt: str, worktree_path: str) -> 
         worktree=worktree_path,
         dry_run=args.dry_run if args.dry_run is not None else os.environ.get("DRY_RUN", "0") == "1",
         prompt=prompt,
-        skip_research=args.skip_research or (args.research is not None),
         research_path=args.research.resolve() if args.research else None,
-        skip_spec=args.skip_spec or (args.spec is not None),
         spec_path=args.spec.resolve() if args.spec else None,
     )
 
@@ -332,11 +364,13 @@ def _render_banner(
              f"max_fix={config.max_fix_iters}, quorum={config.review_quorum}"),
         ]
     else:
-        fields = [
-            ("Prompt", config.prompt),
+        fields = []
+        if config.prompt:
+            fields.append(("Prompt", config.prompt))
+        fields.append(
             ("Config", f"min_score={config.min_score}, max_review={config.max_review_iters}, "
              f"max_fix={config.max_fix_iters}, quorum={config.review_quorum}"),
-        ]
+        )
         if config.research_path:
             fields.append(("Research", str(config.research_path)))
         if config.spec_path:
@@ -347,16 +381,8 @@ def _render_banner(
         if config.worktree:
             fields.append(("Worktree", config.worktree))
         skips = [
-            name
-            for name, flag in [
-                ("spec", config.skip_spec),
-                ("plan-review", config.skip_plan_review),
-                ("implement", config.skip_implement),
-                ("fix", config.skip_fix),
-                ("commit", config.skip_commit),
-                ("pr", config.skip_pr),
-            ]
-            if flag
+            S.name.value.replace("_", "-") for S in PIPELINE
+            if skips_stage(config, S.name)
         ]
         if skips:
             fields.append(("Skip", ", ".join(skips)))
@@ -391,11 +417,15 @@ def _run() -> None:
         plan = plan_restored
         disp = Display(verbose=args.verbose, log_dir=snap_dir / "logs")
 
-        # Set skip flags for completed stages
-        if progress.research_done:
-            config.skip_research = True
-        if progress.spec_draft_done:
-            config.skip_spec = True
+        # Set start_from for completed early stages
+        if progress.plan_draft_done:
+            config.start_from = StageName.preflight
+        elif progress.spec_draft_done:
+            config.start_from = StageName.plan_draft
+        elif progress.research_done:
+            config.start_from = StageName.spec_draft
+
+        # Set skip flags for completed later stages
         if progress.plan_review_done:
             config.skip_plan_review = True
         if progress.implementation_done:
@@ -480,18 +510,11 @@ def _run() -> None:
 
     _run_state.plan = plan
 
-    stages = [
-        ResearchStage(),
-        SpecDraftStage(),
-        PlanDraftStage(),
-        PreflightStage(),
-        PlanReviewStage(),
-        ImplementStage(),
-        ReviewFixStage(),
-        CommitStage(),
-        PushPrStage(),
-    ]
+    stages = [S() for S in PIPELINE]
     for stage in stages:
+        if skips_stage(config, stage.name):
+            ctx.display.info(f"[dim]{stage.label} -- SKIPPED[/dim]")
+            continue
         stage.execute(ctx)
         _run_state.progress = ctx.progress
         _run_state.plan = ctx.plan

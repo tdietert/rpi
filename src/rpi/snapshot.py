@@ -12,9 +12,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from .config import Config
 from .display import Display
 from .plan import Plan, extract_plan_frontmatter
-from .types import Config, SnapshotStageProgress
+from .progress import SnapshotStageProgress
+from .stage_name import StageName
 
 _V1_CONFIG_FIELDS = {
     "plan_path", "min_score", "max_review_iters", "max_fix_iters",
@@ -26,7 +28,7 @@ _V1_CONFIG_FIELDS = {
 
 class Snapshot(BaseModel):
     """Complete RPI run state, serializable to JSON."""
-    version: int = 2
+    version: int = 3
     timestamp: str = ""
     config: Config = Field(default_factory=Config)
 
@@ -52,6 +54,24 @@ class Snapshot(BaseModel):
                 config_data[key] = val
         data["config"] = config_data
         data["version"] = 2
+        return cls.from_v2(data)
+
+    @classmethod
+    def from_v2(cls, data: dict) -> Snapshot:
+        """Migrate a v2 snapshot (skip_research/skip_spec booleans) to v3 (start_from)."""
+        config_data = data.get("config", {})
+        skip_research = config_data.pop("skip_research", False)
+        skip_spec = config_data.pop("skip_spec", False)
+        if "start_from" not in config_data:
+            if config_data.get("plan_path"):
+                config_data["start_from"] = StageName.preflight.value
+            elif skip_spec:
+                config_data["start_from"] = StageName.plan_draft.value
+            elif skip_research:
+                config_data["start_from"] = StageName.spec_draft.value
+            else:
+                config_data["start_from"] = StageName.research.value
+        data["version"] = 3
         return cls.model_validate(data)
 
 
@@ -61,10 +81,15 @@ def create_snapshot_dir(config: Config) -> Path:
     snap_base.mkdir(parents=True, exist_ok=True)
     if config.plan_path is not None:
         slug = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", config.plan_path.stem)
-    else:
-        # Derive slug from prompt in prompt mode
+    elif config.prompt:
         words = config.prompt.split()[:4]
         slug = "-".join(words) if words else ""
+    elif config.spec_path is not None:
+        slug = config.spec_path.stem
+    elif config.research_path is not None:
+        slug = config.research_path.stem
+    else:
+        slug = ""
     slug = re.sub(r"[^a-zA-Z0-9_-]", "-", slug).strip("-") or "rpi"
     ts = time.strftime("%Y%m%d-%H%M%S")
     snap_dir = snap_base / f"rpi-{slug}-{ts}"
@@ -133,8 +158,11 @@ def load_snapshot(snap_dir: Path, display: Display | None = None) -> Snapshot:
             display.error(f"No snapshot.json found in {snap_dir}")
         sys.exit(1)
     data = _json.loads(snap_path.read_text())
-    if data.get("version", 1) < 2:
+    version = data.get("version", 1)
+    if version < 2:
         return Snapshot.from_v1(data)
+    if version < 3:
+        return Snapshot.from_v2(data)
     return Snapshot.model_validate(data)
 
 
@@ -167,12 +195,6 @@ def restore_from_snapshot(
         snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
         if snap_plan.is_file():
             config.plan_path = snap_plan
-
-    # Set skip flags for completed new stages
-    if snapshot.progress.research_done:
-        config.skip_research = True
-    if snapshot.progress.spec_draft_done:
-        config.skip_spec = True
 
     # Verify worktree still exists on disk
     if config.worktree and not Path(config.worktree).is_dir():
