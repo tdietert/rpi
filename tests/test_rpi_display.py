@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console
+from rich.panel import Panel
 
 from rpi.display import (
     Display,
@@ -96,6 +99,9 @@ class TestQuorumActivity:
             act.stream_line("event b", reviewer=0)
             act.stream_line("event c", reviewer=1)
             assert act._event_counts == [2, 1, 0]
+            assert list(act._ring_buffers[0]) == ["event a", "event b"]
+            assert list(act._ring_buffers[1]) == ["event c"]
+            assert list(act._ring_buffers[2]) == []
             act.complete("success", "done")
 
     def test_log_has_tagged_lines(self, display, tmp_path):
@@ -117,6 +123,72 @@ class TestQuorumActivity:
             act.complete("success", "done")
             with pytest.raises(RuntimeError, match="already completed"):
                 act.stream_line("too late", reviewer=0)
+
+    def test_ring_buffer_truncation(self, display):
+        with display.quorum_activity("Review", "quorum-trunc", reviewer_count=2, ring_max=3) as act:
+            for i in range(5):
+                act.stream_line(f"line {i}", reviewer=0)
+            assert list(act._ring_buffers[0]) == ["line 2", "line 3", "line 4"]
+            assert list(act._ring_buffers[1]) == []
+            assert act._event_counts[0] == 5
+            act.complete("success", "done")
+
+    def test_pad_body(self, tmp_path):
+        act = QuorumActivity(
+            label="Test",
+            log_path=tmp_path / "pad.log",
+            reviewer_count=2,
+            ring_max=5,
+            verbose=False,
+            _print=lambda s: None,
+            _update_live=lambda r: None,
+        )
+        assert act._pad_body(["a", "b"], 5) == "a\nb\n\n\n"
+        assert act._pad_body([], 3) == "\n\n"
+        assert act._pad_body(["x", "y", "z"], 3) == "x\ny\nz"
+        act._close_log()
+
+    def test_build_panel_returns_panel(self, tmp_path):
+        act = QuorumActivity(
+            label="Test",
+            log_path=tmp_path / "panel.log",
+            reviewer_count=2,
+            ring_max=4,
+            verbose=False,
+            _print=lambda s: None,
+            _update_live=lambda r: None,
+        )
+        act.stream_line("hello", reviewer=0)
+        result = act._build_panel()
+        assert isinstance(result, Panel)
+        act._close_log()
+
+    def test_quorum_activity_ring_max_passthrough(self, display):
+        with display.quorum_activity("Test", "ring-max-test", reviewer_count=2, ring_max=5) as act:
+            assert act._ring_max == 5
+            act.complete("success", "done")
+
+    def test_adaptive_sizing_short_terminal(self, tmp_path):
+        act = QuorumActivity(
+            label="Test",
+            log_path=tmp_path / "adaptive.log",
+            reviewer_count=3,
+            ring_max=15,
+            verbose=False,
+            _print=lambda s: None,
+            _update_live=lambda r: None,
+        )
+        with patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 20))):
+            act.stream_line("hello", reviewer=0)
+            result = act._build_panel()
+        assert isinstance(result, Panel)
+        # effective = min(15, max(3, (20 - 2) // 3 - 2)) = min(15, 4) = 4
+        # inner panel height = effective + 2 = 6
+        inner_panels = list(result.renderable.renderables)
+        for panel in inner_panels:
+            assert isinstance(panel, Panel)
+            assert panel.height == 6
+        act._close_log()
 
 
 class TestActivityAutoComplete:
