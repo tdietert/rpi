@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..config import Config
 from ..display import Display
 from ..plan import Plan, PlanMetadata
+from ..progress import SnapshotStageProgress
 from ..snapshot import save_snapshot
-from ..types import Config, SnapshotStageProgress
+from ..stage_name import StageName
 
 
 @dataclass
@@ -37,19 +40,13 @@ class PipelineContext:
 
 
 class Stage(ABC):
-    name: str
+    name: StageName
     label: str
-
-    @abstractmethod
-    def should_skip(self, ctx: PipelineContext) -> bool: ...
 
     @abstractmethod
     def run(self, ctx: PipelineContext) -> None: ...
 
     def execute(self, ctx: PipelineContext) -> None:
-        if self.should_skip(ctx):
-            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
         ctx.display.stage_header(self.label)
         self.run(ctx)
         self._snapshot(ctx)
@@ -57,6 +54,49 @@ class Stage(ABC):
     def _snapshot(self, ctx: PipelineContext) -> None:
         if ctx.snap_dir is not None:
             save_snapshot(ctx.snap_dir, ctx.config, ctx.progress, ctx.plan, ctx.work_dir)
+
+
+# Re-export stage classes for convenience
+from .commit import CommitStage
+from .implement import ImplementStage
+from .plan_draft import PlanDraftStage
+from .plan_review import PlanReviewStage
+from .preflight import PreflightStage
+from .push_pr import PushPrStage
+from .research import ResearchStage
+from .review_fix import ReviewFixStage
+from .spec_draft import SpecDraftStage
+
+PIPELINE: tuple[type[Stage], ...] = (
+    ResearchStage,
+    SpecDraftStage,
+    PlanDraftStage,
+    PreflightStage,
+    PlanReviewStage,
+    ImplementStage,
+    ReviewFixStage,
+    CommitStage,
+    PushPrStage,
+)
+
+_STAGE_ORDER: dict[StageName, int] = {S.name: i for i, S in enumerate(PIPELINE)}
+
+_SKIP_FLAGS: dict[StageName, Callable[[Config], bool]] = {
+    StageName.plan_review: lambda c: c.skip_plan_review or c.skip_implement,
+    StageName.preflight: lambda c: c.skip_implement,
+    StageName.implement: lambda c: c.skip_implement,
+    StageName.review_fix: lambda c: c.skip_fix,
+    StageName.commit: lambda c: c.skip_commit,
+    StageName.push_pr: lambda c: c.skip_pr and not c.push,
+}
+
+
+def skips_stage(config: Config, stage: StageName) -> bool:
+    """Determine whether a stage should be skipped based on config."""
+    if _STAGE_ORDER[config.start_from] > _STAGE_ORDER[stage]:
+        return True
+    flag_fn = _SKIP_FLAGS.get(stage)
+    return flag_fn(config) if flag_fn else False
 
 
 def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -> None:
@@ -73,32 +113,32 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     rows: list[tuple[str, str, str]] = []
 
     # Research
-    if ctx.config.skip_research or ctx.config.plan_path is not None:
+    if skips_stage(config, StageName.research):
         rows.append(("Research", "", skip_label()))
     elif ctx.progress.research_done:
         rows.append(("Research", icon(True), "done"))
-    elif not ctx.config.skip_research:
+    else:
         rows.append(("Research", "", "in progress"))
 
     # Spec Draft
-    if ctx.config.skip_spec or ctx.config.plan_path is not None or ctx.config.spec_path is not None:
+    if skips_stage(config, StageName.spec_draft):
         rows.append(("Spec Draft", "", skip_label()))
     elif ctx.progress.spec_draft_done:
         rows.append(("Spec Draft", icon(True), "done"))
-    elif not ctx.config.skip_spec:
+    else:
         rows.append(("Spec Draft", "", "in progress"))
 
     # Plan Draft
-    if ctx.config.plan_path is not None and not ctx.progress.plan_draft_done:
+    if skips_stage(config, StageName.plan_draft):
         rows.append(("Plan Draft", "", skip_label()))
     elif ctx.progress.plan_draft_done:
         rows.append(("Plan Draft", icon(True), "done"))
-    elif ctx.config.plan_path is None:
+    else:
         rows.append(("Plan Draft", "", "in progress"))
 
     if meta is not None:
         # Plan review
-        if config.skip_implement or config.skip_plan_review:
+        if skips_stage(config, StageName.plan_review):
             rows.append(("Plan Review", "", skip_label()))
         else:
             ok = ctx.review_score is not None and ctx.review_score >= config.min_score
@@ -106,14 +146,14 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
             rows.append(("Plan Review", icon(ok), detail))
 
         # Implementation
-        if config.skip_implement:
+        if skips_stage(config, StageName.implement):
             rows.append(("Implement", "", skip_label()))
         else:
             n_phases = len(ctx.plan.phases) if ctx.plan else 0
             rows.append(("Implement", icon(True), f"{n_phases} phases"))
 
     # Review-fix
-    if config.skip_fix:
+    if skips_stage(config, StageName.review_fix):
         rows.append(("Review-Fix", "", skip_label()))
     else:
         ok = ctx.fix_status == "clean"
@@ -123,7 +163,7 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
         rows.append(("Review-Fix", icon(ok), detail))
 
     # Commit
-    if config.skip_commit:
+    if skips_stage(config, StageName.commit):
         rows.append(("Commit", "", skip_label()))
     elif ctx.commit_result:
         ok = ctx.commit_result.status == "success"
@@ -137,7 +177,7 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     # Push / PR
     if config.push:
         rows.append(("Push", icon(ctx.push_ok), "done" if ctx.push_ok else "failed"))
-    elif config.skip_pr:
+    elif skips_stage(config, StageName.push_pr):
         rows.append(("PR", "", skip_label()))
     elif ctx.pr_result:
         ok = ctx.pr_result.status == "success"
@@ -151,18 +191,8 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     ctx.display.summary_table(f"Summary  {meta.title if meta else 'RPI Run'}", rows, footer or None, total_elapsed=total_elapsed)
 
 
-# Re-export stage classes for convenience
-from .commit import CommitStage
-from .implement import ImplementStage
-from .plan_draft import PlanDraftStage
-from .plan_review import PlanReviewStage
-from .preflight import PreflightStage
-from .push_pr import PushPrStage
-from .research import ResearchStage
-from .review_fix import ReviewFixStage
-from .spec_draft import SpecDraftStage
-
 __all__ = [
+    "PIPELINE",
     "CommitStage",
     "ImplementStage",
     "PipelineContext",
@@ -175,4 +205,5 @@ __all__ = [
     "SpecDraftStage",
     "Stage",
     "print_summary",
+    "skips_stage",
 ]

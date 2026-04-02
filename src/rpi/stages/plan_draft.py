@@ -13,6 +13,7 @@ from ..plan import (
     validate_plan,
 )
 from ..process import run_claude_structured
+from ..stage_name import StageName
 from . import Stage
 
 _PLAN_SYSTEM = (
@@ -39,11 +40,8 @@ and verification commands
 
 
 class PlanDraftStage(Stage):
-    name = "plan_draft"
+    name = StageName.plan_draft
     label = "Plan Draft"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.plan_path is not None
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -68,7 +66,8 @@ class PlanDraftStage(Stage):
             parts.append("## Research Context\n")
             parts.append(research_content)
             parts.append("")
-        parts.append(f"## Task\n\n{config.prompt}\n")
+        if config.prompt:
+            parts.append(f"## Task\n\n{config.prompt}\n")
         parts.append(f"## Instructions\n\n{_PLAN_INSTRUCTIONS}")
         prompt = "\n".join(parts)
 

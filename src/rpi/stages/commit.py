@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..process import run_claude_structured
+from ..stage_name import StageName
 from . import Stage
 
 
@@ -19,11 +20,8 @@ class CommitResult(BaseModel):
 
 
 class CommitStage(Stage):
-    name = "commit"
+    name = StageName.commit
     label = "Stage 4: Commit"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.skip_commit
 
     def run(self, ctx) -> None:
         config = ctx.config

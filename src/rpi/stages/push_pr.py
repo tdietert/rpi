@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..display import Display
 from ..process import run_claude_structured
+from ..stage_name import StageName
 from . import Stage
 
 
@@ -47,15 +48,10 @@ def _run_push(display: Display, dry_run: bool, worktree: str = "") -> bool:
 
 
 class PushPrStage(Stage):
-    name = "push_pr"
+    name = StageName.push_pr
     label = "Stage 5: Push/PR"
 
-    def should_skip(self, ctx) -> bool:
-        # Never fully skip — the execute method handles the branching logic
-        return False
-
     def run(self, ctx) -> None:
-        # This is handled entirely in execute due to complex branching
         pass
 
     def execute(self, ctx) -> None:

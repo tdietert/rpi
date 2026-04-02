@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..process import run_claude_structured
+from ..stage_name import StageName
 from . import Stage
 
 
@@ -20,15 +21,8 @@ class SpecResult(BaseModel):
 
 
 class SpecDraftStage(Stage):
-    name = "spec_draft"
+    name = StageName.spec_draft
     label = "Spec Draft"
-
-    def should_skip(self, ctx) -> bool:
-        return (
-            ctx.config.skip_spec
-            or ctx.config.plan_path is not None
-            or ctx.config.spec_path is not None
-        )
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -85,10 +79,14 @@ class SpecDraftStage(Stage):
         ctx.progress.spec_draft_done = True
 
     def _build_prompt(self, config, research_path: Path | None) -> str:
-        parts = [
-            "Run /rpi-spec to create an architectural spec for the following task:\n",
-            config.prompt,
-        ]
+        parts = ["Run /rpi-spec to create an architectural spec"]
+        if config.prompt:
+            parts[0] += " for the following task:\n"
+            parts.append(config.prompt)
+        elif research_path:
+            parts[0] += " based on the research file below."
+        else:
+            parts[0] += "."
         if research_path:
             parts.append(f"\n\nResearch file: {research_path}")
         return "\n".join(parts)

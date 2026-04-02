@@ -18,7 +18,8 @@ from ..diagnosis import (
 )
 from ..plan import PlanPhase
 from ..process import run_claude_structured
-from ..types import SnapshotPhaseProgress
+from ..progress import SnapshotPhaseProgress
+from ..stage_name import StageName
 from . import Stage
 
 
@@ -77,11 +78,8 @@ def _format_phase_prompt(phase: PlanPhase, plan_path: Path) -> str:
 
 
 class ImplementStage(Stage):
-    name = "implement"
+    name = StageName.implement
     label = "Stage 2: Implementation"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.skip_implement
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -265,8 +263,5 @@ class ImplementStage(Stage):
         ctx.progress.implementation_done = True
 
     def execute(self, ctx) -> None:
-        if self.should_skip(ctx):
-            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
         self.run(ctx)
         self._snapshot(ctx)

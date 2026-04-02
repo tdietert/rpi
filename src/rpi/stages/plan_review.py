@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from ..plan import run_plan_processing
+from ..progress import SnapshotReviewProgress
 from ..review import ReviewLoopConfig, run_review_loop
-from ..types import SnapshotReviewProgress
+from ..stage_name import StageName
 from . import Stage
 
 
 class PlanReviewStage(Stage):
-    name = "plan_review"
+    name = StageName.plan_review
     label = "Stage 1: Plan Review"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.skip_plan_review or ctx.config.skip_implement
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -67,7 +65,4 @@ class PlanReviewStage(Stage):
         self._snapshot(ctx)
 
     def execute(self, ctx) -> None:
-        if self.should_skip(ctx):
-            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
         self.run(ctx)

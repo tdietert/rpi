@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
+from ..progress import SnapshotReviewProgress
 from ..review import ReviewLoopConfig, run_review_loop
-from ..types import SnapshotReviewProgress
+from ..stage_name import StageName
 from . import Stage
 
 
 class ReviewFixStage(Stage):
-    name = "review_fix"
+    name = StageName.review_fix
     label = "Stage 3: Review-Fix"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.skip_fix
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -60,8 +58,5 @@ class ReviewFixStage(Stage):
         )
 
     def execute(self, ctx) -> None:
-        if self.should_skip(ctx):
-            ctx.display.info(f"[dim]{self.label} -- SKIPPED[/dim]")
-            return
         self.run(ctx)
         self._snapshot(ctx)

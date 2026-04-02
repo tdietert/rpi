@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..process import run_claude_structured
+from ..stage_name import StageName
 from . import Stage
 
 
@@ -20,11 +21,8 @@ class ResearchResult(BaseModel):
 
 
 class ResearchStage(Stage):
-    name = "research"
+    name = StageName.research
     label = "Research"
-
-    def should_skip(self, ctx) -> bool:
-        return ctx.config.skip_research or ctx.config.plan_path is not None
 
     def run(self, ctx) -> None:
         config = ctx.config
