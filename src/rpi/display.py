@@ -5,12 +5,13 @@ from __future__ import annotations
 import shutil
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -165,32 +166,57 @@ class QuorumActivity(Activity):
         label: str,
         log_path: Path,
         reviewer_count: int,
+        ring_max: int,
         verbose: bool,
         _print: Callable[[str], None],
         _update_live: Callable[[RenderableType], None],
     ) -> None:
         super().__init__(label, log_path, verbose, _print, _update_live)
         self.reviewer_count = reviewer_count
+        self._ring_max = ring_max
+        self._ring_buffers: list[deque[str]] = [deque(maxlen=ring_max) for _ in range(reviewer_count)]
         self._event_counts: list[int] = [0] * reviewer_count
 
     def stream_line(self, text: str, reviewer: int) -> None:
         if self._completed:
             raise RuntimeError("Activity already completed")
         self._event_counts[reviewer] += 1
+        self._ring_buffers[reviewer].append(text)
         self._write_log(f"[reviewer {reviewer}] {text}\n")
         self._update_live(self._build_panel())
         if self._verbose:
             self._print(f"[dim]\\[reviewer {reviewer}][/dim] {text}")
 
+    def _pad_body(self, lines: list[str] | deque[str], height: int) -> str:
+        padded = list(lines)[:height] + [""] * max(0, height - len(lines))
+        return "\n".join(padded)
+
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
-        lines = []
-        for i, count in enumerate(self._event_counts):
-            lines.append(f"  Reviewer {i + 1}: {count} events")
-        body = "\n".join(lines)
+
+        terminal_height = shutil.get_terminal_size().lines
+        chrome_lines = 2
+        panel_chrome = 2
+        effective = min(
+            self._ring_max,
+            max(3, (terminal_height - chrome_lines) // self.reviewer_count - panel_chrome),
+        )
+
+        panels = []
+        for i in range(self.reviewer_count):
+            body = self._pad_body(self._ring_buffers[i], effective)
+            panels.append(
+                Panel(
+                    body,
+                    title=f"Reviewer {i + 1} ({self._event_counts[i]} events)",
+                    height=effective + 2,
+                    border_style="dim",
+                )
+            )
+
         return Panel(
-            body,
+            Group(*panels),
             title=f"{spinner} [bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
             border_style="blue",
         )
@@ -326,7 +352,7 @@ class Display:
                     self._active = None
 
     @contextmanager
-    def quorum_activity(self, label: str, log_name: str, reviewer_count: int) -> Iterator[QuorumActivity]:
+    def quorum_activity(self, label: str, log_name: str, reviewer_count: int, ring_max: int = 15) -> Iterator[QuorumActivity]:
         with self._lock:
             if self._active is not None:
                 raise RuntimeError("Another activity is already active")
@@ -334,6 +360,7 @@ class Display:
                 label=label,
                 log_path=self._log_dir / f"{log_name}.log",
                 reviewer_count=reviewer_count,
+                ring_max=ring_max,
                 verbose=self._verbose,
                 _print=self._print,
                 _update_live=self._update_live,
