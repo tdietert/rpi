@@ -18,6 +18,8 @@ from rich.table import Table
 if TYPE_CHECKING:
     from rich.console import RenderableType
 
+SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
 DisplayStatus = Literal["success", "failed", "running", "skipped", "warning"]
 ActivityStatus = Literal["success", "failed", "skipped"]
 
@@ -76,6 +78,27 @@ class Activity:
         self._log_file = self._log_path.open("w")
         self.start_time = time.monotonic()
         self._completed = False
+        self._refresh_stop = threading.Event()
+        self._refresh_thread: threading.Thread | None = None
+
+    def _start_refresh_thread(self) -> None:
+        """Spawn a daemon thread that rebuilds the panel every 0.5s."""
+
+        def _loop() -> None:
+            while not self._refresh_stop.wait(0.5):
+                if self._completed:
+                    break
+                self._update_live(self._build_panel())  # type: ignore[attr-defined]
+
+        self._refresh_thread = threading.Thread(target=_loop, daemon=True)
+        self._refresh_thread.start()
+
+    def _stop_refresh_thread(self) -> None:
+        """Signal the refresh thread to stop and wait for it."""
+        self._refresh_stop.set()
+        if self._refresh_thread is not None:
+            self._refresh_thread.join(timeout=2)
+            self._refresh_thread = None
 
     def complete(self, status: ActivityStatus, summary: str) -> None:
         """Mark the activity as completed with a status and summary line."""
@@ -125,10 +148,11 @@ class StreamActivity(Activity):
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
+        spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
         body = "\n".join(self._ring_buffer) if self._ring_buffer else "[dim]waiting...[/dim]"
         return Panel(
             body,
-            title=f"[bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            title=f"{spinner} [bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
             border_style="blue",
         )
 
@@ -160,13 +184,14 @@ class QuorumActivity(Activity):
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
+        spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
         lines = []
         for i, count in enumerate(self._event_counts):
             lines.append(f"  Reviewer {i + 1}: {count} events")
         body = "\n".join(lines)
         return Panel(
             body,
-            title=f"[bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            title=f"{spinner} [bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
             border_style="blue",
         )
 
@@ -204,9 +229,11 @@ class Display:
         self._live.start()
 
     def _stop_live(self) -> None:
-        if self._live is not None:
-            self._live.stop()
+        with self._lock:
+            live = self._live
             self._live = None
+        if live is not None:
+            live.stop()
 
     def info(self, msg: str) -> None:
         self._print(f"  {msg}")
@@ -284,6 +311,7 @@ class Display:
             )
             self._active = act
         self._start_live()
+        act._start_refresh_thread()
         try:
             yield act
         finally:
@@ -291,6 +319,7 @@ class Display:
                 if not act._completed:
                     act.complete("failed", f"{label} — interrupted")
             finally:
+                act._stop_refresh_thread()
                 act._close_log()
                 self._stop_live()
                 with self._lock:
@@ -311,6 +340,7 @@ class Display:
             )
             self._active = act
         self._start_live()
+        act._start_refresh_thread()
         try:
             yield act
         finally:
@@ -318,6 +348,7 @@ class Display:
                 if not act._completed:
                     act.complete("failed", f"{label} — interrupted")
             finally:
+                act._stop_refresh_thread()
                 act._close_log()
                 self._stop_live()
                 with self._lock:
@@ -327,6 +358,18 @@ class Display:
         """Ask a yes/no question. Raises if an activity is active."""
         if self._active is not None:
             raise RuntimeError("Cannot confirm while an activity is active")
+        import sys
+        import termios
+        # Restore terminal to sane cooked mode in case Rich Live left it dirty.
+        try:
+            fd = sys.stdin.fileno()
+            termios.tcsetattr(fd, termios.TCSANOW, termios.tcgetattr(fd))
+            # Force canonical mode + echo so input() works normally.
+            attrs = termios.tcgetattr(fd)
+            attrs[3] |= termios.ICANON | termios.ECHO | termios.ISIG
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except (termios.error, OSError, ValueError):
+            pass
         self._console.print(f"  {prompt} [dim](y/n)[/dim] ", end="")
         answer = input().strip().lower()
         return answer in ("y", "yes")
