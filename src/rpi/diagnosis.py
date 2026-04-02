@@ -10,9 +10,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .display import Display
+from .iteration import IterationRecord, format_iteration_history
 from .plan import PlanPhase
 from .process import run_claude_with_display
-from .types import IterationRecord, format_iteration_history
 
 
 class DiagnosisResult(BaseModel):

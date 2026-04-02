@@ -1,14 +1,11 @@
-"""Cross-cutting types used throughout the RPI pipeline."""
+"""Shared data types for the review/fix iteration machinery."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
-Effort = Literal["low", "medium", "high"]
 
 
 class ReviewIssue(BaseModel):
@@ -85,53 +82,3 @@ class ApplyFeedbackResult(BaseModel):
     summary: str = Field(
         description="One-line summary of changes made to the plan"
     )
-
-
-class Config(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
-
-    plan_path: Path | None = None
-    min_score: int = 8  # threshold on 0-10 scale (ReviewResult.score / 2)
-    max_review_iters: int = 3
-    max_fix_iters: int = 3
-    review_quorum: int = 3  # number of parallel reviewers
-    skip_plan_review: bool = False
-    skip_implement: bool = False
-    skip_fix: bool = False
-    skip_commit: bool = False
-    skip_pr: bool = False
-    push: bool = False  # push to current branch after commit (implies skip_pr)
-    worktree: str = ""  # if non-empty, absolute path to a pre-created git worktree
-    dry_run: bool = False
-    prompt: str = ""
-    skip_research: bool = False
-    research_path: Path | None = None
-    skip_spec: bool = False
-    spec_path: Path | None = None
-
-
-class SnapshotPhaseProgress(BaseModel):
-    """Tracks which implementation phases have completed."""
-    completed_phases: list[int] = Field(default_factory=list)
-    phase_attempts: dict[str, int] = Field(default_factory=dict)
-
-
-class SnapshotReviewProgress(BaseModel):
-    """Tracks progress within a review loop."""
-    completed_iterations: int = 0
-    last_score: int | None = None
-
-
-class SnapshotStageProgress(BaseModel):
-    """Tracks which stages are done and in-flight progress."""
-    plan_review_done: bool = False
-    plan_review: SnapshotReviewProgress | None = None
-    implementation_done: bool = False
-    implementation: SnapshotPhaseProgress | None = None
-    review_fix_done: bool = False
-    review_fix: SnapshotReviewProgress | None = None
-    commit_done: bool = False
-    push_or_pr_done: bool = False
-    research_done: bool = False
-    spec_draft_done: bool = False
-    plan_draft_done: bool = False

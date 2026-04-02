@@ -9,9 +9,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from .config import Config
 from .display import Display
+from .iteration import ApplyFeedbackResult
 from .process import run_claude_structured
-from .types import ApplyFeedbackResult, Config
 
 
 class PlanTask(BaseModel):

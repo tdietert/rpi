@@ -16,9 +16,9 @@ from typing import Literal, TypeVar, Union, get_args, get_origin
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
+from .config import Effort
 from .display import Display, StreamActivity
 from .skills import ADD_DIR_PATH
-from .types import Effort
 
 T = TypeVar("T", bound=BaseModel)
 
