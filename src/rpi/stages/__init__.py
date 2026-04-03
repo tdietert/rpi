@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Config
-from ..display import Display
+from ..display import Display, dim, green, red
 from ..plan import Plan, PlanMetadata
 from ..progress import SnapshotStageProgress
 from ..snapshot import save_snapshot
@@ -59,18 +59,18 @@ class Stage(ABC):
 # Re-export stage classes for convenience
 from .commit import CommitStage
 from .implement import ImplementStage
-from .plan_draft import PlanDraftStage
+from .plan import PlanStage
 from .plan_review import PlanReviewStage
 from .preflight import PreflightStage
 from .push_pr import PushPrStage
 from .research import ResearchStage
 from .review_fix import ReviewFixStage
-from .spec_draft import SpecDraftStage
+from .spec import SpecStage
 
 PIPELINE: tuple[type[Stage], ...] = (
     ResearchStage,
-    SpecDraftStage,
-    PlanDraftStage,
+    SpecStage,
+    PlanStage,
     PreflightStage,
     PlanReviewStage,
     ImplementStage,
@@ -105,10 +105,10 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     meta = ctx.meta
 
     def icon(ok: bool) -> str:
-        return "[green]ok[/green]" if ok else "[red]--[/red]"
+        return green("ok") if ok else red("--")
 
     def skip_label() -> str:
-        return "[dim]skipped[/dim]"
+        return dim("skipped")
 
     rows: list[tuple[str, str, str]] = []
 
@@ -196,13 +196,13 @@ __all__ = [
     "CommitStage",
     "ImplementStage",
     "PipelineContext",
-    "PlanDraftStage",
     "PlanReviewStage",
+    "PlanStage",
     "PreflightStage",
     "PushPrStage",
     "ResearchStage",
     "ReviewFixStage",
-    "SpecDraftStage",
+    "SpecStage",
     "Stage",
     "print_summary",
     "skips_stage",

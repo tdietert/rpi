@@ -28,7 +28,7 @@ from rich.table import Table
 
 from .banner import render_banner
 from .config import Config
-from .display import Display
+from .display import Display, dim
 from .plan import Plan, PlanMetadata, parse_plan_metadata, validate_plan_file
 from .process import cleanup_children, sigint_handler
 from .progress import SnapshotStageProgress
@@ -247,7 +247,7 @@ def _build_config(args: argparse.Namespace, prompt: str, worktree_path: str) -> 
         skip_commit=args.skip_commit if args.skip_commit is not None else os.environ.get("SKIP_COMMIT", "0") == "1",
         skip_pr=(args.skip_pr if args.skip_pr is not None else os.environ.get("SKIP_PR", "0") == "1") or push,
         push=push,
-        worktree=worktree_path,
+        worktree=worktree_path or os.getcwd(),
         dry_run=args.dry_run if args.dry_run is not None else os.environ.get("DRY_RUN", "0") == "1",
         prompt=prompt,
         research_path=args.research.resolve() if args.research else None,
@@ -375,7 +375,7 @@ def _run() -> None:
     stages = [S() for S in PIPELINE]
     for stage in stages:
         if skips_stage(config, stage.name):
-            ctx.display.info(f"[dim]{stage.label} -- SKIPPED[/dim]")
+            ctx.display.info(dim(f"{stage.label} -- SKIPPED"))
             continue
         stage.execute(ctx)
         _run_state.progress = ctx.progress

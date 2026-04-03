@@ -39,7 +39,7 @@ and verification commands
 - Include a testing strategy, risks, and open questions"""
 
 
-class PlanDraftStage(Stage):
+class PlanStage(Stage):
     name = StageName.plan_draft
     label = "Plan Draft"
 

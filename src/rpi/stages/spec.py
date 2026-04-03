@@ -20,7 +20,7 @@ class SpecResult(BaseModel):
     errors: str = Field(description="Any errors encountered, or 'None'")
 
 
-class SpecDraftStage(Stage):
+class SpecStage(Stage):
     name = StageName.spec_draft
     label = "Spec Draft"
 

@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-from .display import Display
+from rich.markup import escape as rich_escape
+
+from .display import Display, dim, green, yellow
 from .iteration import (
     ApplyFeedbackResult,
     IterationRecord,
@@ -68,7 +70,7 @@ def run_review_quorum(
     """Run parallel reviewers with streaming display and structured output."""
     if dry_run:
         if display is not None:
-            display.info(f"[dim]\\[DRY RUN] Would launch {quorum_size} parallel reviewers[/dim]")
+            display.info(dim(f"[DRY RUN] Would launch {quorum_size} parallel reviewers"))
         r = make_dry_run_default(ReviewResult)
         # Override scores to max so the dry-run review is accepted on the first
         # iteration.  Without this, auto-generated defaults may produce scores
@@ -325,9 +327,9 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
         result = quorum_result.aggregated
 
         score_10 = result.score // 2
-        score_style = "green" if score_10 >= config.min_score else "yellow"
+        _score_fmt = green if score_10 >= config.min_score else yellow
         display.info(
-            f"Score: [{score_style}]{score_10}/10[/{score_style}] ({result.score}/20), "
+            f"Score: {_score_fmt(f'{score_10}/10')} ({result.score}/20), "
             f"Verdict: {derive_verdict(result)}"
         )
         if result.issues:
@@ -335,7 +337,8 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
             n_notes = sum(1 for i in result.issues if i.severity == "note")
             display.info(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
             for issue in result.issues[:5]:
-                display.info(f"  - \\[{issue.severity.upper()}] {issue.description[:100]}")
+                sev_tag = rich_escape(f"[{issue.severity.upper()}]")
+                display.info(f"  - {sev_tag} {issue.description[:100]}")
             if len(result.issues) > 5:
                 display.info(f"  ... and {len(result.issues) - 5} more")
 
@@ -369,7 +372,7 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
 
         if score_10 >= config.min_score and derive_verdict(result) == "Ready":
             display.info(
-                f"[green]{config.pass_message}[/green] {score_10}/10 after {iteration} iteration(s)."
+                f"{green(config.pass_message)} {score_10}/10 after {iteration} iteration(s)."
             )
             return ReviewLoopResult(score=score_10, iterations=iteration, converged=True)
 

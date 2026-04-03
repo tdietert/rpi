@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..display import Display
+from ..display import Display, dim, green
 from ..process import run_claude_structured
 from ..stage_name import StageName
 from . import Stage
@@ -24,7 +24,7 @@ class PrResult(BaseModel):
 def _run_push(display: Display, dry_run: bool, worktree: str = "") -> bool:
     """Push the current branch to origin. Returns True on success."""
     if dry_run:
-        display.info("[dim]\\[DRY RUN] git push -u origin HEAD[/dim]")
+        display.info(dim("[DRY RUN] git push -u origin HEAD"))
         return True
 
     proc = subprocess.run(
@@ -39,7 +39,7 @@ def _run_push(display: Display, dry_run: bool, worktree: str = "") -> bool:
             for line in output.splitlines()[-3:]:
                 display.info(line.strip())
         else:
-            display.info("[green]Pushed.[/green]")
+            display.info(green("Pushed."))
         return True
     else:
         stderr = (proc.stderr or "").strip()
@@ -60,19 +60,19 @@ class PushPrStage(Stage):
 
         if config.push:
             if commit_result and commit_result.status == "failed":
-                ctx.display.info("[dim]Stage 5: Push -- SKIPPED (commit failed)[/dim]")
+                ctx.display.info(dim("Stage 5: Push -- SKIPPED (commit failed)"))
             else:
                 ctx.display.stage_header("Stage 5: Push")
                 ctx.push_ok = _run_push(ctx.display, config.dry_run, config.worktree)
                 ctx.display.info(
-                    f"[green]Stage 5 complete:[/green] {'success' if ctx.push_ok else 'failed'}"
+                    f"{green('Stage 5 complete:')} {'success' if ctx.push_ok else 'failed'}"
                 )
                 ctx.progress.push_or_pr_done = True
                 self._snapshot(ctx)
         elif config.skip_pr:
-            ctx.display.info("[dim]Stage 5: Create PR -- SKIPPED[/dim]")
+            ctx.display.info(dim("Stage 5: Create PR -- SKIPPED"))
         elif commit_result and commit_result.status == "failed":
-            ctx.display.info("[dim]Stage 5: Create PR -- SKIPPED (commit failed)[/dim]")
+            ctx.display.info(dim("Stage 5: Create PR -- SKIPPED (commit failed)"))
         else:
             ctx.display.stage_header("Stage 5: Create PR")
             with ctx.display.activity("Create PR", "create-pr") as act:
@@ -89,7 +89,7 @@ class PushPrStage(Stage):
                     "success" if pr_result.status == "success" else "failed",
                     pr_result.pr_url or pr_result.status,
                 )
-            ctx.display.info(f"[green]Stage 5 complete:[/green] {pr_result.status}")
+            ctx.display.info(f"{green('Stage 5 complete:')} {pr_result.status}")
             ctx.pr_result = pr_result
             ctx.progress.push_or_pr_done = True
             self._snapshot(ctx)

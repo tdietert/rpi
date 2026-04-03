@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..display import green
 from ..plan import run_plan_processing
 from ..progress import SnapshotReviewProgress
 from ..review import ReviewLoopConfig, run_review_loop
@@ -44,7 +45,7 @@ class PlanReviewStage(Stage):
         ctx.review_iters = result.iterations
 
         ctx.display.info(
-            f"[green]Stage 1 complete:[/green] score {ctx.review_score}/10 "
+            f"{green('Stage 1 complete:')} score {ctx.review_score}/10 "
             f"after {ctx.review_iters} iteration(s)"
         )
 

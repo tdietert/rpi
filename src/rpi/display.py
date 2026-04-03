@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import threading
 import time
@@ -13,8 +14,10 @@ from typing import TYPE_CHECKING, Literal
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markup import escape as rich_escape
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 if TYPE_CHECKING:
     from rich.console import RenderableType
@@ -38,6 +41,52 @@ STATUS_STYLES: dict[DisplayStatus, str] = {
     "running": "blue",
     "skipped": "dim",
     "warning": "yellow",
+}
+
+_RICH_TAG_RE = re.compile(r"\[/?[a-z][a-z_ ]*\]")
+
+
+def green(text: str) -> str:
+    """Wrap text in green Rich markup, auto-escaping special characters."""
+    return f"[green]{rich_escape(str(text))}[/green]"
+
+
+def red(text: str) -> str:
+    """Wrap text in red Rich markup, auto-escaping special characters."""
+    return f"[red]{rich_escape(str(text))}[/red]"
+
+
+def dim(text: str) -> str:
+    """Wrap text in dim Rich markup, auto-escaping special characters."""
+    return f"[dim]{rich_escape(str(text))}[/dim]"
+
+
+def bold(text: str) -> str:
+    """Wrap text in bold Rich markup, auto-escaping special characters."""
+    return f"[bold]{rich_escape(str(text))}[/bold]"
+
+
+def yellow(text: str) -> str:
+    """Wrap text in yellow Rich markup, auto-escaping special characters."""
+    return f"[yellow]{rich_escape(str(text))}[/yellow]"
+
+
+def cyan(text: str) -> str:
+    """Wrap text in cyan Rich markup, auto-escaping special characters."""
+    return f"[cyan]{rich_escape(str(text))}[/cyan]"
+
+
+def italic(text: str) -> str:
+    """Wrap text in italic Rich markup, auto-escaping special characters."""
+    return f"[italic]{rich_escape(str(text))}[/italic]"
+
+
+_STYLE_FN: dict[str, Callable[[str], str]] = {
+    "green": green,
+    "red": red,
+    "blue": lambda t: f"[blue]{rich_escape(str(t))}[/blue]",
+    "dim": dim,
+    "yellow": yellow,
 }
 
 
@@ -79,6 +128,7 @@ class Activity:
         self._log_file = self._log_path.open("w")
         self.start_time = time.monotonic()
         self._completed = False
+        self._completion_line: str | None = None
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
 
@@ -102,13 +152,21 @@ class Activity:
             self._refresh_thread = None
 
     def complete(self, status: ActivityStatus, summary: str) -> None:
-        """Mark the activity as completed with a status and summary line."""
+        """Mark the activity as completed with a status and summary line.
+
+        The completion line is deferred — stored in ``_completion_line`` and
+        printed by the owning context manager **after** the Live panel is
+        stopped.  Printing while Live is active causes Rich to hide/re-show
+        the panel, which produces a visible blink of raw markup tags.
+        """
         self._completed = True
         elapsed = time.monotonic() - self.start_time
         icon = STATUS_ICONS.get(status, "?")
         style = STATUS_STYLES.get(status, "")
-        line = f"[{style}]{icon}[/{style}] {self.label} [{style}]{summary}[/{style}] [dim]({elapsed:.1f}s)[/dim]"
-        self._print(line)
+        _style = _STYLE_FN[style]
+        self._completion_line = (
+            f"{_style(icon)} {self.label} {_style(summary)} {dim(f'({elapsed:.1f}s)')}"
+        )
         self._write_log(f"\n--- {status}: {summary} ({elapsed:.1f}s) ---\n")
         self._log_file.flush()
 
@@ -133,27 +191,40 @@ class StreamActivity(Activity):
         _update_live: Callable[[RenderableType], None],
     ) -> None:
         super().__init__(label, log_path, verbose, _print, _update_live)
-        self._ring_buffer: list[str] = []
         self._ring_max = ring_max
+        self._ring_buffer: deque[str] = deque(maxlen=ring_max)
+        self._event_count = 0
 
     def stream_line(self, text: str) -> None:
         if self._completed:
             raise RuntimeError("Activity already completed")
+        self._event_count += 1
         self._ring_buffer.append(text)
-        if len(self._ring_buffer) > self._ring_max:
-            self._ring_buffer = self._ring_buffer[-self._ring_max :]
-        self._write_log(text + "\n")
+        self._write_log(_RICH_TAG_RE.sub("", text) + "\n")
         self._update_live(self._build_panel())
-        if self._verbose:
-            self._print(text)
+
+    def _pad_body(self, lines: deque[str], height: int) -> str:
+        padded = list(lines)[:height] + [""] * max(0, height - len(lines))
+        return "\n".join(padded)
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
-        body = "\n".join(self._ring_buffer) if self._ring_buffer else "[dim]waiting...[/dim]"
-        return Panel(
+
+        terminal_height = shutil.get_terminal_size().lines
+        chrome_lines = 4
+        effective = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
+
+        body = Text.from_markup(self._pad_body(self._ring_buffer, effective)) if self._ring_buffer else Text.from_markup(dim("waiting..."))
+        inner = Panel(
             body,
-            title=f"{spinner} [bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            title=f"Agent ({self._event_count} events)",
+            height=effective + 2,
+            border_style="dim",
+        )
+        return Panel(
+            inner,
+            title=f"{spinner} {bold(self.label)} {dim(f'({elapsed:.1f}s)')}",
             border_style="blue",
         )
 
@@ -182,14 +253,12 @@ class QuorumActivity(Activity):
             raise RuntimeError("Activity already completed")
         self._event_counts[reviewer] += 1
         self._ring_buffers[reviewer].append(text)
-        self._write_log(f"[reviewer {reviewer}] {text}\n")
+        self._write_log(f"[reviewer {reviewer}] {_RICH_TAG_RE.sub('', text)}\n")
         self._update_live(self._build_panel())
-        if self._verbose:
-            self._print(f"[dim]\\[reviewer {reviewer}][/dim] {text}")
 
-    def _pad_body(self, lines: list[str] | deque[str], height: int) -> str:
+    def _pad_body(self, lines: list[str] | deque[str], height: int) -> Text:
         padded = list(lines)[:height] + [""] * max(0, height - len(lines))
-        return "\n".join(padded)
+        return Text.from_markup("\n".join(padded))
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
@@ -217,7 +286,7 @@ class QuorumActivity(Activity):
 
         return Panel(
             Group(*panels),
-            title=f"{spinner} [bold]{self.label}[/bold] [dim]({elapsed:.1f}s)[/dim]",
+            title=f"{spinner} {bold(self.label)} {dim(f'({elapsed:.1f}s)')}",
             border_style="blue",
         )
 
@@ -288,15 +357,16 @@ class Display:
         """Print startup banner as a rich Panel."""
         lines: list[str] = []
         for label, value in fields:
-            lines.append(f"[cyan]{label + ':':<12}[/cyan] {value}")
+            padded = f"{label + ':':<12}"
+            lines.append(f"{cyan(padded)} {value}")
         body = "\n".join(lines)
-        panel = Panel(body, title=f"[bold]{title}[/bold]", border_style="blue", width=min(80, self._width))
+        panel = Panel(body, title=bold(title), border_style="blue", width=min(80, self._width))
         self._console.print(panel)
 
     def stage_header(self, text: str) -> None:
         """Print a stage transition header."""
         self._console.print()
-        self._console.rule(f"[bold]{text}[/bold]")
+        self._console.rule(bold(text))
 
     def summary_table(
         self,
@@ -319,7 +389,7 @@ class Display:
             table.add_row("", "")
             for k, v in effective_footer.items():
                 table.add_row(k, v)
-        panel = Panel(table, title=f"[bold]{title}[/bold]", border_style="dim", width=min(80, self._width))
+        panel = Panel(table, title=bold(title), border_style="dim", width=min(80, self._width))
         self._stdout.print(panel)
 
     @contextmanager
@@ -348,6 +418,8 @@ class Display:
                 act._stop_refresh_thread()
                 act._close_log()
                 self._stop_live()
+                if act._completion_line:
+                    self._print(act._completion_line)
                 with self._lock:
                     self._active = None
 
@@ -378,6 +450,8 @@ class Display:
                 act._stop_refresh_thread()
                 act._close_log()
                 self._stop_live()
+                if act._completion_line:
+                    self._print(act._completion_line)
                 with self._lock:
                     self._active = None
 
@@ -397,7 +471,7 @@ class Display:
             termios.tcsetattr(fd, termios.TCSANOW, attrs)
         except (termios.error, OSError, ValueError):
             pass
-        self._console.print(f"  {prompt} [dim](y/n)[/dim] ", end="")
+        self._console.print(f"  {prompt} {dim('(y/n)')} ", end="")
         answer = input().strip().lower()
         return answer in ("y", "yes")
 
@@ -411,7 +485,7 @@ class Display:
         from prompt_toolkit import prompt as pt_prompt
 
         action = "provide input" if is_initial_input else "provide feedback"
-        self._console.print(f"\n  [bold]{stage_name}:[/bold] {action} (press [dim]Esc+Enter[/dim] to submit, [dim]Ctrl-D[/dim] to skip)")
+        self._console.print(f"\n  {bold(stage_name + ':')} {action} (press {dim('Esc+Enter')} to submit, {dim('Ctrl-D')} to skip)")
         try:
             text = pt_prompt("  > ", multiline=True)
         except EOFError:

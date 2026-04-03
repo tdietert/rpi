@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..display import green
 from ..progress import SnapshotReviewProgress
 from ..review import ReviewLoopConfig, run_review_loop
 from ..stage_name import StageName
@@ -47,7 +48,7 @@ class ReviewFixStage(Stage):
         ctx.fix_iters = result.iterations
 
         ctx.display.info(
-            f"[green]Stage 3 complete:[/green] score {ctx.fix_score}/10 "
+            f"{green('Stage 3 complete:')} score {ctx.fix_score}/10 "
             f"after {ctx.fix_iters} iteration(s)"
         )
 

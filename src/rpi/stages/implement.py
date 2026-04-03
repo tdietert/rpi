@@ -16,6 +16,7 @@ from ..diagnosis import (
     run_verification_fix,
     triage_verification_failure,
 )
+from ..display import dim, green
 from ..plan import PlanPhase
 from ..process import run_claude_structured
 from ..progress import SnapshotPhaseProgress
@@ -97,7 +98,7 @@ class ImplementStage(Stage):
             phase_num = phase.number
 
             if skip_phases and phase_num in skip_phases:
-                ctx.display.info(f"[dim]Phase {phase_num}/{num_phases}: {phase.name} -- SKIPPED (already complete)[/dim]")
+                ctx.display.info(dim(f"Phase {phase_num}/{num_phases}: {phase.name} -- SKIPPED (already complete)"))
                 continue
 
             ctx.display.stage_header(
@@ -198,7 +199,7 @@ class ImplementStage(Stage):
                                 record.verification_error = v_msg
                                 fix_records.append(record)
                                 if v_ok:
-                                    ctx.display.info("[green]Verification: passed (after command correction)[/green]")
+                                    ctx.display.info(green("Verification: passed (after command correction)"))
                                     break
 
                             case "code_fix":
@@ -226,7 +227,7 @@ class ImplementStage(Stage):
                                 record.verification_error = v_msg
                                 fix_records.append(record)
                                 if v_ok:
-                                    ctx.display.info("[green]Verification: passed (after code fix)[/green]")
+                                    ctx.display.info(green("Verification: passed (after code fix)"))
                                     break
 
                             case "fundamental":
@@ -250,15 +251,15 @@ class ImplementStage(Stage):
                             ctx.display.error(f"Stopped at phase {phase_num}.")
                             sys.exit(1)
                 else:
-                    ctx.display.info("[green]Verification: passed[/green]")
+                    ctx.display.info(green("Verification: passed"))
 
-            ctx.display.info(f"[green]Phase {phase_num}/{num_phases} complete:[/green] {result.summary}")
+            ctx.display.info(f"{green(f'Phase {phase_num}/{num_phases} complete:')} {result.summary}")
             ctx.progress.implementation.completed_phases.append(phase_num)
             self._snapshot(ctx)
 
-        ctx.display.info(f"[green]All {num_phases} phases implemented.[/green]")
+        ctx.display.info(green(f"All {num_phases} phases implemented."))
         ctx.display.info(
-            f"[green]Stage 2 complete:[/green] all {num_phases} phases implemented"
+            f"{green('Stage 2 complete:')} all {num_phases} phases implemented"
         )
         ctx.progress.implementation_done = True
 

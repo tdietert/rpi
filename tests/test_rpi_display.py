@@ -77,7 +77,7 @@ class TestStreamActivity:
             for i in range(10):
                 act.stream_line(f"line {i}")
             assert len(act._ring_buffer) == 3
-            assert act._ring_buffer == ["line 7", "line 8", "line 9"]
+            assert list(act._ring_buffer) == ["line 7", "line 8", "line 9"]
             act.complete("success", "done")
 
     def test_stream_line_raises_after_complete(self, display):
@@ -143,9 +143,9 @@ class TestQuorumActivity:
             _print=lambda s: None,
             _update_live=lambda r: None,
         )
-        assert act._pad_body(["a", "b"], 5) == "a\nb\n\n\n"
-        assert act._pad_body([], 3) == "\n\n"
-        assert act._pad_body(["x", "y", "z"], 3) == "x\ny\nz"
+        assert act._pad_body(["a", "b"], 5).plain == "a\nb\n\n\n"
+        assert act._pad_body([], 3).plain == "\n\n"
+        assert act._pad_body(["x", "y", "z"], 3).plain == "x\ny\nz"
         act._close_log()
 
     def test_build_panel_returns_panel(self, tmp_path):
