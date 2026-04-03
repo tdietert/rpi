@@ -39,8 +39,9 @@ def create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> str
     )
 
     slug = _derive_slug(args, prompt)
+    gh_user = _gh_username()
 
-    branch_name = f"rpi/{slug}"
+    branch_name = f"{gh_user}/rpi-{slug}" if gh_user else f"rpi/{slug}"
     base_branch = args.worktree_base or "main"
     ts = int(time.time())
     worktree_dir = repo_root / ".claude" / "worktrees" / f"{slug}-{ts}"
@@ -53,6 +54,25 @@ def create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> str
         disp.error(f"Failed to create worktree: {result.stderr.strip()}")
         sys.exit(1)
     return str(worktree_dir)
+
+
+def _gh_username() -> str:
+    """Return the authenticated GitHub username, or empty string on failure."""
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines() + result.stderr.splitlines():
+            line = line.strip()
+            if "Logged in to" in line and "account" in line:
+                # Format: "✓ Logged in to github.com account USERNAME (keyring)"
+                parts = line.split("account")
+                if len(parts) > 1:
+                    return parts[1].strip().split()[0]
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return ""
 
 
 def _derive_slug(args: argparse.Namespace, prompt: str) -> str:
