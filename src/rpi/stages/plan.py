@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from ..display import filelink
 from ..plan import (
     Plan,
     PlanMetadata,
@@ -98,7 +99,7 @@ class PlanStage(Stage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(md)
 
-        ctx.display.info(f"Plan written to: {path}")
+        ctx.display.info(f"Plan written to: {filelink(path)}")
 
         # Feedback loop
         while True:
@@ -127,7 +128,7 @@ class PlanStage(Stage):
             plan = self._validate_with_fix(plan, ctx)
             md = serialize_plan_to_markdown(plan, config.prompt, today, research_path_str, spec_path_str)
             path.write_text(md)
-            ctx.display.info(f"Plan written to: {path}")
+            ctx.display.info(f"Plan written to: {filelink(path)}")
 
         # Set context for downstream stages
         ctx.plan = plan

@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..display import filelink
 from ..process import run_claude_structured
 from ..stage_name import StageName
 from . import Stage
@@ -44,7 +45,7 @@ class SpecStage(Stage):
             )
 
         path = Path(result.spec_path)
-        ctx.display.info(f"Spec written to: {path}")
+        ctx.display.info(f"Spec written to: {filelink(path)}")
 
         # Feedback loop
         while True:
@@ -72,7 +73,7 @@ class SpecStage(Stage):
                     result.title,
                 )
             path = Path(result.spec_path)
-            ctx.display.info(f"Spec updated: {path}")
+            ctx.display.info(f"Spec updated: {filelink(path)}")
 
         ctx.spec_path = path
         ctx.config.spec_path = path

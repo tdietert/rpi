@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from .config import Effort
-from .display import Display, StreamActivity, bold, dim, green, italic, red
+from .display import Display, StreamActivity, bold, dim, green, red
 from .skills import ADD_DIR_PATH
 
 T = TypeVar("T", bound=BaseModel)
@@ -131,27 +131,15 @@ def _drain_queue(
         yield item
 
 
-def _shorten_path(path: str, max_len: int = 60) -> str:
-    """Collapse long absolute paths, keeping the last 2-3 components."""
-    if len(path) <= max_len:
-        return path
-    parts = path.split("/")
-    if len(parts) > 3:
-        return "\u2026/" + "/".join(parts[-3:])
-    return path[:max_len - 1] + "\u2026"
-
-
 def _tool_input_summary(inp: dict) -> str:
-    """Extract a brief human-readable summary from a tool input dict."""
+    """Extract a human-readable summary from a tool input dict."""
     for key in ("file_path", "pattern", "command", "path", "query"):
         val = inp.get(key)
         if isinstance(val, str) and val:
-            if key in ("file_path", "path") and "/" in val:
-                return _shorten_path(val)
-            return val[:80]
+            return val
     for val in inp.values():
         if isinstance(val, str) and val:
-            return val[:80]
+            return val
     return ""
 
 
@@ -210,7 +198,7 @@ def _parse_stream_event(
                 for line in block["text"].split("\n"):
                     line = line.rstrip()
                     if line:
-                        parts.append(italic(line))
+                        parts.append(line)
             elif block.get("type") == "tool_use":
                 tool_id = block.get("id", "")
                 name = block.get("name", "tool")
@@ -253,7 +241,7 @@ def _parse_stream_event(
                         err_text = " ".join(texts)
                     else:
                         err_text = str(content)
-                    preview = err_text[:100].split("\n")[0]
+                    preview = err_text[:100].split("\n")[0] + ("…" if len(err_text) > 100 else "")
                     parts.append(f"{red('✗')} {label} {red(f'— {preview}')}")
                 else:
                     parts.append(f"{green('✓')} {label}")
@@ -268,7 +256,7 @@ def _parse_stream_event(
             for line in lines:
                 line = line.rstrip()
                 if line:
-                    parts.append(italic(line))
+                    parts.append(line)
             return "\n".join(parts) if parts else None
     return None
 

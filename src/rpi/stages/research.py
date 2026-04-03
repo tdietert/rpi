@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..display import filelink
 from ..process import run_claude_structured
 from ..stage_name import StageName
 from . import Stage
@@ -47,7 +48,7 @@ class ResearchStage(Stage):
             )
 
         path = Path(result.research_path)
-        ctx.display.info(f"Research written to: {path}")
+        ctx.display.info(f"Research written to: {filelink(path)}")
 
         # Feedback loop
         while True:
@@ -75,7 +76,7 @@ class ResearchStage(Stage):
                     result.title,
                 )
             path = Path(result.research_path)
-            ctx.display.info(f"Research updated: {path}")
+            ctx.display.info(f"Research updated: {filelink(path)}")
 
         ctx.research_path = path
         ctx.config.research_path = path

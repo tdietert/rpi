@@ -81,6 +81,12 @@ def italic(text: str) -> str:
     return f"[italic]{rich_escape(str(text))}[/italic]"
 
 
+def filelink(path: str | Path) -> str:
+    """Wrap a file path in a clickable file:// hyperlink (OSC 8)."""
+    s = str(path)
+    return f"[link=file://{s}]{rich_escape(s)}[/link]"
+
+
 _STYLE_FN: dict[str, Callable[[str], str]] = {
     "green": green,
     "red": red,

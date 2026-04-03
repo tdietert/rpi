@@ -166,16 +166,14 @@ class TestParseStreamEvent:
 
     def test_text_delta(self):
         result, _, _ = self._parse({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}})
-        assert "[italic]" in result
-        assert "hello" in result
+        assert result == "hello"
 
     def test_assistant_text_blocks(self):
         result, _, _ = self._parse({
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": "analysis"}]},
         })
-        assert "[italic]" in result
-        assert "analysis" in result
+        assert result == "analysis"
 
     def test_content_block_start_tool_use_deferred(self):
         """Tool calls are deferred — content_block_start returns None and stores in pending."""
@@ -279,7 +277,7 @@ class TestToolInputSummary:
     def test_fallback_to_first_string(self):
         assert _tool_input_summary({"custom_key": "value"}) == "value"
 
-    def test_truncation(self):
-        long_val = "x" * 100
+    def test_no_truncation(self):
+        long_val = "x" * 200
         result = _tool_input_summary({"file_path": long_val})
-        assert len(result) == 80
+        assert result == long_val

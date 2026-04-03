@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import Config
-from .display import Display
+from .display import Display, filelink
 from .plan import PlanMetadata
 from .progress import SnapshotStageProgress
 from .stages import PIPELINE, skips_stage
@@ -27,7 +27,7 @@ def render_banner(
     elif meta:
         fields = [
             ("Plan", meta.title),
-            ("File", str(config.plan_path)),
+            ("File", filelink(config.plan_path)),
             ("Phases", str(meta.num_phases)),
             ("Config", _config_summary(config)),
         ]
@@ -37,9 +37,9 @@ def render_banner(
             fields.append(("Prompt", config.prompt))
         fields.append(("Config", _config_summary(config)))
         if config.research_path:
-            fields.append(("Research", str(config.research_path)))
+            fields.append(("Research", filelink(config.research_path)))
         if config.spec_path:
-            fields.append(("Spec", str(config.spec_path)))
+            fields.append(("Spec", filelink(config.spec_path)))
 
     if progress is None:
         if config.worktree:
@@ -52,8 +52,8 @@ def render_banner(
             fields.append(("Skip", ", ".join(skips)))
         if config.push:
             fields.append(("Push", "yes (commit + push, no PR)"))
-        fields.append(("Snapshot", str(snap_dir)))
-        fields.append(("Work", str(work_dir)))
+        fields.append(("Snapshot", filelink(snap_dir)))
+        fields.append(("Work", filelink(work_dir)))
 
     disp.banner("Review-Implement-Fix", fields)
 
@@ -75,10 +75,10 @@ def _resume_fields(
 ) -> list[tuple[str, str]]:
     fields: list[tuple[str, str]] = [("Plan", meta.title if meta else config.prompt[:60])]
     if config.plan_path:
-        fields.append(("File", str(config.plan_path)))
+        fields.append(("File", filelink(config.plan_path)))
     if meta and meta.num_phases:
         fields.append(("Phases", str(meta.num_phases)))
-    fields.append(("Snapshot", str(snap_dir)))
+    fields.append(("Snapshot", filelink(snap_dir)))
     if resume_completed_phases:
         fields.append(("Resuming", f"skipping phases {sorted(resume_completed_phases)}"))
 
@@ -98,5 +98,5 @@ def _resume_fields(
             completed_stages.append(label)
     if completed_stages:
         fields.append(("Done", ", ".join(completed_stages)))
-    fields.append(("Work", str(work_dir)))
+    fields.append(("Work", filelink(work_dir)))
     return fields

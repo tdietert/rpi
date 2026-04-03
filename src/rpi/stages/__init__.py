@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Config
-from ..display import Display, dim, green, red
+from ..display import Display, dim, filelink, green, red
 from ..plan import Plan, PlanMetadata
 from ..progress import SnapshotStageProgress
 from ..snapshot import save_snapshot
@@ -186,7 +186,7 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
 
     footer = {}
     if config.worktree:
-        footer["Worktree"] = config.worktree
+        footer["Worktree"] = filelink(config.worktree)
 
     ctx.display.summary_table(f"Summary  {meta.title if meta else 'RPI Run'}", rows, footer or None, total_elapsed=total_elapsed)
 
