@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from .config import Effort
-from .display import Display, StreamActivity
+from .display import Display, StreamActivity, bold, dim, green, italic, red
 from .skills import ADD_DIR_PATH
 
 T = TypeVar("T", bound=BaseModel)
@@ -131,24 +131,44 @@ def _drain_queue(
         yield item
 
 
+def _shorten_path(path: str, max_len: int = 60) -> str:
+    """Collapse long absolute paths, keeping the last 2-3 components."""
+    if len(path) <= max_len:
+        return path
+    parts = path.split("/")
+    if len(parts) > 3:
+        return "\u2026/" + "/".join(parts[-3:])
+    return path[:max_len - 1] + "\u2026"
+
+
 def _tool_input_summary(inp: dict) -> str:
     """Extract a brief human-readable summary from a tool input dict."""
     for key in ("file_path", "pattern", "command", "path", "query"):
         val = inp.get(key)
         if isinstance(val, str) and val:
+            if key in ("file_path", "path") and "/" in val:
+                return _shorten_path(val)
             return val[:80]
-    # Fallback: first string value
     for val in inp.values():
         if isinstance(val, str) and val:
             return val[:80]
     return ""
 
 
-def _parse_stream_event(raw_line: str, result_holder: list[str]) -> str | None:
+def _parse_stream_event(
+    raw_line: str,
+    result_holder: list[str],
+    pending_tools: dict[str, tuple[str, str]],
+) -> str | None:
     """Parse a stream-json line and return displayable text, or None.
 
     For ``result`` events the structured_output (or result) text is stored
     in *result_holder[0]* so the reader thread can pass it back.
+
+    Tool calls are tracked and only emitted when results arrive:
+    - Success: checkmark ToolName summary
+    - Error: X ToolName summary -- error message
+    - Parallel cancellation: silently dropped
     """
     raw_line = raw_line.strip()
     if not raw_line:
@@ -174,10 +194,12 @@ def _parse_stream_event(raw_line: str, result_holder: list[str]) -> str | None:
     if etype == "content_block_start":
         cb = event.get("content_block", {})
         if cb.get("type") == "tool_use":
+            tool_id = cb.get("id", "")
             name = cb.get("name", "tool")
             inp = cb.get("input", {})
             summary = _tool_input_summary(inp)
-            return f"-> {name} {summary}" if summary else f"-> {name}"
+            if tool_id:
+                pending_tools[tool_id] = (name, summary)
         return None
 
     if etype == "assistant":
@@ -185,17 +207,69 @@ def _parse_stream_event(raw_line: str, result_holder: list[str]) -> str | None:
         parts = []
         for block in msg.get("content", []):
             if block.get("type") == "text":
-                parts.append(block["text"])
+                for line in block["text"].split("\n"):
+                    line = line.rstrip()
+                    if line:
+                        parts.append(italic(line))
             elif block.get("type") == "tool_use":
+                tool_id = block.get("id", "")
                 name = block.get("name", "tool")
                 inp = block.get("input", {})
                 summary = _tool_input_summary(inp)
-                parts.append(f"-> {name} {summary}" if summary else f"-> {name}")
+                if tool_id:
+                    pending_tools[tool_id] = (name, summary)
         return "\n".join(parts) if parts else None
+
+    if etype == "user":
+        msg = event.get("message", {})
+        parts = []
+        for block in msg.get("content", []):
+            if block.get("type") == "tool_result":
+                tool_use_id = block.get("tool_use_id", "")
+                is_error = block.get("is_error", False)
+                content = block.get("content", "")
+
+                is_cancelled = False
+                if isinstance(content, list):
+                    if any(c.get("type") == "tool_use_error" for c in content):
+                        is_cancelled = True
+                elif isinstance(content, str) and "<tool_use_error>" in content:
+                    is_cancelled = True
+
+                if is_cancelled:
+                    pending_tools.pop(tool_use_id, None)
+                    continue
+
+                name, summary = pending_tools.pop(tool_use_id, ("tool", ""))
+                label = f"{bold(name)} {dim(summary)}" if summary else bold(name)
+
+                if is_error:
+                    if isinstance(content, list):
+                        texts = [
+                            c.get("text", "")
+                            for c in content
+                            if c.get("type") == "text"
+                        ]
+                        err_text = " ".join(texts)
+                    else:
+                        err_text = str(content)
+                    preview = err_text[:100].split("\n")[0]
+                    parts.append(f"{red('✗')} {label} {red(f'— {preview}')}")
+                else:
+                    parts.append(f"{green('✓')} {label}")
+        return "\n".join(parts) if parts else None
+
     if etype == "content_block_delta":
         delta = event.get("delta", {})
         if delta.get("type") == "text_delta":
-            return delta.get("text")
+            raw = delta.get("text", "")
+            lines = raw.split("\n")
+            parts = []
+            for line in lines:
+                line = line.rstrip()
+                if line:
+                    parts.append(italic(line))
+            return "\n".join(parts) if parts else None
     return None
 
 
@@ -206,17 +280,17 @@ def _reader(
     reviewer: int | None = None,
 ) -> None:
     """Background thread: read *proc.stdout*, push lines to *q*, push sentinel on exit."""
+    pending_tools: dict[str, tuple[str, str]] = {}
     try:
         for raw_line in proc.stdout:
-            text = _parse_stream_event(raw_line, result_holder)
+            text = _parse_stream_event(raw_line, result_holder, pending_tools)
             if text:
                 for line in text.split("\n"):
-                    stripped = line.rstrip()
-                    if stripped:
+                    if line:
                         if reviewer is not None:
-                            q.put((reviewer, stripped))
+                            q.put((reviewer, line))
                         else:
-                            q.put(stripped)
+                            q.put(line)
         proc.wait()
     finally:
         q.put(_SENTINEL)

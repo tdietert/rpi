@@ -159,76 +159,108 @@ class TestInterrupt:
 
 
 class TestParseStreamEvent:
+    def _parse(self, event_dict, holder=None, pending=None):
+        holder = holder or [""]
+        pending = pending if pending is not None else {}
+        return _parse_stream_event(json.dumps(event_dict), holder, pending), holder, pending
+
     def test_text_delta(self):
-        event = json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}})
-        holder = [""]
-        assert _parse_stream_event(event, holder) == "hello"
+        result, _, _ = self._parse({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}})
+        assert "[italic]" in result
+        assert "hello" in result
 
     def test_assistant_text_blocks(self):
-        event = json.dumps({
+        result, _, _ = self._parse({
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": "analysis"}]},
         })
-        holder = [""]
-        assert _parse_stream_event(event, holder) == "analysis"
+        assert "[italic]" in result
+        assert "analysis" in result
 
-    def test_content_block_start_tool_use(self):
-        event = json.dumps({
-            "type": "content_block_start",
-            "content_block": {"type": "tool_use", "id": "t1", "name": "Read", "input": {}},
-        })
-        holder = [""]
-        assert _parse_stream_event(event, holder) == "-> Read"
+    def test_content_block_start_tool_use_deferred(self):
+        """Tool calls are deferred — content_block_start returns None and stores in pending."""
+        pending = {}
+        result, _, pending = self._parse(
+            {"type": "content_block_start", "content_block": {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}},
+            pending=pending,
+        )
+        assert result is None
+        assert "t1" in pending
+        assert pending["t1"] == ("Read", "")
 
-    def test_content_block_start_tool_use_with_input(self):
-        event = json.dumps({
-            "type": "content_block_start",
-            "content_block": {
-                "type": "tool_use",
-                "id": "t1",
-                "name": "Read",
-                "input": {"file_path": "src/main.py"},
-            },
-        })
-        holder = [""]
-        assert _parse_stream_event(event, holder) == "-> Read src/main.py"
+    def test_tool_result_success(self):
+        """Tool results emit green checkmark with tool name."""
+        pending = {"t1": ("Read", "src/main.py")}
+        result, _, _ = self._parse(
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "ok"},
+            ]}},
+            pending=pending,
+        )
+        assert "✓" in result
+        assert "Read" in result
+
+    def test_tool_result_error(self):
+        """Tool errors emit red X with error preview."""
+        pending = {"t1": ("Bash", "ls")}
+        result, _, _ = self._parse(
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": "command not found"},
+            ]}},
+            pending=pending,
+        )
+        assert "✗" in result
+        assert "Bash" in result
+
+    def test_tool_cancellation_dropped(self):
+        """Parallel cancellations are silently dropped."""
+        pending = {"t1": ("Read", "")}
+        result, _, pending = self._parse(
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "tool_use_error"}]},
+            ]}},
+            pending=pending,
+        )
+        assert result is None
+        assert "t1" not in pending
 
     def test_content_block_start_text_returns_none(self):
-        event = json.dumps({
+        result, _, _ = self._parse({
             "type": "content_block_start",
             "content_block": {"type": "text", "text": ""},
         })
-        holder = [""]
-        assert _parse_stream_event(event, holder) is None
+        assert result is None
 
-    def test_assistant_tool_use_blocks(self):
-        event = json.dumps({
-            "type": "assistant",
-            "message": {"content": [
-                {"type": "tool_use", "name": "Grep", "input": {"pattern": "TODO"}},
-            ]},
-        })
-        holder = [""]
-        assert _parse_stream_event(event, holder) == "-> Grep TODO"
+    def test_assistant_tool_use_stored_in_pending(self):
+        pending = {}
+        result, _, pending = self._parse(
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t2", "name": "Grep", "input": {"pattern": "TODO"}},
+            ]}},
+            pending=pending,
+        )
+        assert result is None
+        assert "t2" in pending
 
     def test_input_json_delta_returns_none(self):
-        event = json.dumps({
+        result, _, _ = self._parse({
             "type": "content_block_delta",
             "delta": {"type": "input_json_delta", "partial_json": '{"file_path":'},
         })
-        holder = [""]
-        assert _parse_stream_event(event, holder) is None
+        assert result is None
 
     def test_result_stores_structured_output(self):
-        event = json.dumps({"type": "result", "structured_output": '{"score": 18}'})
         holder = [""]
-        assert _parse_stream_event(event, holder) is None
+        result, holder, _ = self._parse(
+            {"type": "result", "structured_output": '{"score": 18}'},
+            holder=holder,
+        )
+        assert result is None
         assert holder[0] == '{"score": 18}'
 
     def test_unknown_event_returns_none(self):
-        event = json.dumps({"type": "system", "data": "something"})
-        holder = [""]
-        assert _parse_stream_event(event, holder) is None
+        result, _, _ = self._parse({"type": "system", "data": "something"})
+        assert result is None
 
 
 class TestToolInputSummary:
