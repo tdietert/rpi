@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import re
 import subprocess
@@ -60,18 +62,17 @@ def _gh_username() -> str:
     """Return the authenticated GitHub username, or empty string on failure."""
     try:
         result = subprocess.run(
-            ["gh", "auth", "status"],
+            ["gh", "auth", "status", "--json", "hosts"],
             capture_output=True, text=True, timeout=5,
         )
-        for line in result.stdout.splitlines() + result.stderr.splitlines():
-            line = line.strip()
-            if "Logged in to" in line and "account" in line:
-                # Format: "✓ Logged in to github.com account USERNAME (keyring)"
-                parts = line.split("account")
-                if len(parts) > 1:
-                    return parts[1].strip().split()[0]
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        if result.returncode == 0:
+            hosts = json.loads(result.stdout).get("hosts", {})
+            for accounts in hosts.values():
+                for account in accounts:
+                    if account.get("active"):
+                        return account.get("login", "")
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError) as exc:
+        logging.warning("Could not resolve GitHub username: %s", exc)
     return ""
 
 
