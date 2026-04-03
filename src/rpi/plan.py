@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from .config import Config
-from .display import Display
+from .display import Display, green
 from .iteration import ApplyFeedbackResult
 from .process import run_claude_structured
 
@@ -51,8 +51,8 @@ class Plan(BaseModel):
     )
     testing_strategy: str = Field(min_length=1, description="End-to-end testing approach")
     risks: list[str] = Field(description="Risks and edge cases")
-    open_questions: str = Field(
-        description="Any unresolved questions, or 'None'"
+    open_questions: list[str] = Field(
+        default_factory=list, description="Any unresolved questions"
     )
 
 
@@ -238,10 +238,157 @@ def serialize_plan_to_markdown(
     lines.append("")
     lines.append("## Open Questions")
     lines.append("")
-    lines.append(plan.open_questions)
+    if plan.open_questions:
+        for q in plan.open_questions:
+            lines.append(f"- {q}")
+    else:
+        lines.append("None")
     lines.append("")
 
     return "\n".join(lines)
+
+
+def parse_plan_from_markdown(text: str) -> Plan:
+    """Parse plan markdown into a Plan model deterministically."""
+    # Strip YAML frontmatter
+    if text.startswith("---"):
+        end = text.find("---", 3)
+        if end != -1:
+            text = text[end + 3:].lstrip("\n")
+
+    lines = text.split("\n")
+
+    # Extract title from first # heading
+    title = ""
+    for line in lines:
+        m = re.match(r"^#\s+(.+)", line)
+        if m:
+            title = m.group(1).strip()
+            # Strip trailing "Implementation Plan"
+            title = re.sub(r"\s+Implementation Plan$", "", title)
+            break
+    if not title:
+        raise ValueError("Missing plan title: no `# Title` heading found")
+
+    # Split by ## headings into sections
+    sections: dict[str, str] = {}
+    current_section = ""
+    current_lines: list[str] = []
+    for line in lines:
+        m = re.match(r"^##\s+(.+)", line)
+        if m:
+            if current_section:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = m.group(1).strip()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_section:
+        sections[current_section] = "\n".join(current_lines).strip()
+
+    required = ["Implementation Phases"]
+    for req in required:
+        if req not in sections:
+            raise ValueError(f"Missing required section: ## {req}")
+
+    overview = sections.get("Overview", "")
+    current_state = sections.get("Current State", "")
+    desired_end_state = sections.get("Desired End State", "")
+    testing_strategy = sections.get("Testing Strategy", "")
+
+    risks_text = sections.get("Risks and Edge Cases", "")
+    risks = [
+        re.sub(r"^-\s*", "", line).strip()
+        for line in risks_text.split("\n")
+        if line.strip().startswith("-")
+    ]
+
+    oq_text = sections.get("Open Questions", "")
+    open_questions = [
+        re.sub(r"^-\s*", "", line).strip()
+        for line in oq_text.split("\n")
+        if line.strip().startswith("-")
+    ]
+
+    # Parse phases
+    phases_text = sections["Implementation Phases"]
+    phase_chunks = re.split(r"(?m)^#{2,6}\s+Phase\s+(\d+):\s*(.+)", phases_text)
+    # phase_chunks: [preamble, num1, name1, body1, num2, name2, body2, ...]
+    phases: list[PlanPhase] = []
+    i = 1
+    while i < len(phase_chunks) - 2:
+        phase_num = int(phase_chunks[i])
+        phase_name = phase_chunks[i + 1].strip()
+        phase_body = phase_chunks[i + 2]
+        i += 3
+
+        # Extract goal
+        goal_m = re.search(r"\*\*Goal:\*\*\s*(.+)", phase_body)
+        goal = goal_m.group(1).strip() if goal_m else ""
+
+        # Extract verification items
+        verif_m = re.search(
+            r"\*\*Verification:\*\*\s*\n((?:\s*-\s*\[.\]\s*.+\n?)+)", phase_body
+        )
+        verification: list[str] = []
+        if verif_m:
+            for vm in re.finditer(r"-\s*\[.\]\s*(.+)", verif_m.group(1)):
+                verification.append(vm.group(1).strip())
+
+        # Extract verification commands
+        vcmd_m = re.search(
+            r"\*\*Verification Commands:\*\*\s*\n((?:\s*-\s*`.+`\s*\n?)+)", phase_body
+        )
+        verification_commands: list[str] = []
+        if vcmd_m:
+            for cm in re.finditer(r"-\s*`(.+?)`", vcmd_m.group(1)):
+                verification_commands.append(cm.group(1).strip())
+
+        # Extract tasks
+        task_chunks = re.split(r"(?m)^#{2,6}\s+Task\s+([\d.]+):\s*(.+)", phase_body)
+        tasks: list[PlanTask] = []
+        j = 1
+        while j < len(task_chunks) - 2:
+            task_id = task_chunks[j].strip()
+            task_name = task_chunks[j + 1].strip()
+            task_body = task_chunks[j + 2]
+            j += 3
+
+            # Truncate task body at **Verification:** to avoid capturing
+            # phase-level verification items as task steps
+            verif_boundary = re.search(r"\*\*Verification", task_body)
+            task_content = task_body[:verif_boundary.start()] if verif_boundary else task_body
+
+            files_m = re.search(r"\*\*Files:\*\*\s*(.+)", task_content)
+            if not files_m:
+                raise ValueError(f"Task {task_id}: missing **Files:**")
+            files = [f.strip() for f in files_m.group(1).split(",") if f.strip()]
+
+            group_m = re.search(r"\*\*Group:\*\*\s*(.+)", task_content)
+            group = group_m.group(1).strip() if group_m else "A"
+
+            steps = [
+                m.group(1).strip()
+                for m in re.finditer(r"-\s*\[.\]\s*(.+)", task_content)
+            ]
+
+            tasks.append(PlanTask(
+                id=task_id, name=task_name, files=files, group=group, steps=steps,
+            ))
+
+        if not tasks:
+            raise ValueError(f"Phase {phase_num}: no tasks found")
+
+        phases.append(PlanPhase(
+            number=phase_num, name=phase_name, goal=goal, tasks=tasks,
+            verification=verification, verification_commands=verification_commands,
+        ))
+
+    return Plan(
+        title=title, overview=overview, current_state=current_state,
+        desired_end_state=desired_end_state, phases=phases,
+        testing_strategy=testing_strategy, risks=risks, open_questions=open_questions,
+    )
 
 
 def plan_file_path(title: str, date: str) -> Path:
@@ -307,31 +454,7 @@ def run_plan_processing(
 
     plan_text = path.read_text()
     with display.activity("Parse Plan", "parse-plan") as act:
-        parsed = run_claude_structured(
-            prompt=(
-                "Extract the implementation plan into the provided JSON schema. "
-                "Read the plan text below and populate every field precisely from "
-                "the plan content. Do not invent information -- extract only what "
-                "is written.\n\n"
-                "For each task, the 'id' is the X.Y number (e.g. '1.1', '2.3'), "
-                "'name' is the short descriptive name after the Task heading, "
-                "'files' are from the **Files:** line, 'group' is from the **Group:** "
-                "line, and 'steps' are the checkbox items (without the '- [ ] ' or "
-                "'- [x] ' prefix).\n\n"
-                "For verification, extract each verification item as a string "
-                "(without checkbox prefix).\n\n"
-                "For verification_commands, extract each command from the "
-                "**Verification Commands:** backtick-quoted items as raw strings "
-                "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
-                f"Plan text:\n\n{plan_text}"
-            ),
-            schema=Plan,
-            effort="low",
-            work_dir=work_dir,
-            dry_run=config.dry_run,
-            worktree=config.worktree,
-            activity=act,
-        )
+        parsed = parse_plan_from_markdown(plan_text)
         act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")
 
     # Deterministic validation + auto-fix loop
@@ -339,7 +462,7 @@ def run_plan_processing(
     for attempt in range(max_fix_attempts):
         validation_errors = validate_plan(parsed, display)
         if not validation_errors:
-            display.info("[green]Plan structure validated.[/green]")
+            display.info(green("Plan structure validated."))
             return parsed
 
         display.warn("Plan structure validation found issues:")
@@ -388,31 +511,7 @@ def run_plan_processing(
         # Re-parse the modified plan
         plan_text = path.read_text()
         with display.activity("Re-parse Plan", f"reparse-plan-{attempt + 1}") as act:
-            parsed = run_claude_structured(
-                prompt=(
-                    "Extract the implementation plan into the provided JSON schema. "
-                    "Read the plan text below and populate every field precisely from "
-                    "the plan content. Do not invent information -- extract only what "
-                    "is written.\n\n"
-                    "For each task, the 'id' is the X.Y number (e.g. '1.1', '2.3'), "
-                    "'name' is the short descriptive name after the Task heading, "
-                    "'files' are from the **Files:** line, 'group' is from the **Group:** "
-                    "line, and 'steps' are the checkbox items (without the '- [ ] ' or "
-                    "'- [x] ' prefix).\n\n"
-                    "For verification, extract each verification item as a string "
-                    "(without checkbox prefix).\n\n"
-                    "For verification_commands, extract each command from the "
-                    "**Verification Commands:** backtick-quoted items as raw strings "
-                    "(e.g., `make typecheck` becomes `make typecheck`).\n\n"
-                    f"Plan text:\n\n{plan_text}"
-                ),
-                schema=Plan,
-                effort="low",
-                work_dir=work_dir,
-                dry_run=config.dry_run,
-                worktree=config.worktree,
-                activity=act,
-            )
+            parsed = parse_plan_from_markdown(plan_text)
             act.complete("success", f"{parsed.title} ({len(parsed.phases)} phases)")
 
     # Unreachable, but satisfies the type checker
