@@ -15,6 +15,7 @@ from typing import Literal, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
+from rich.markup import escape as rich_escape
 
 from .config import Effort
 from .display import Display, StreamActivity, bold, dim, green, red
@@ -198,7 +199,7 @@ def _parse_stream_event(
                 for line in block["text"].split("\n"):
                     line = line.rstrip()
                     if line:
-                        parts.append(line)
+                        parts.append(rich_escape(line))
             elif block.get("type") == "tool_use":
                 tool_id = block.get("id", "")
                 name = block.get("name", "tool")
@@ -256,7 +257,7 @@ def _parse_stream_event(
             for line in lines:
                 line = line.rstrip()
                 if line:
-                    parts.append(line)
+                    parts.append(rich_escape(line))
             return "\n".join(parts) if parts else None
     return None
 
