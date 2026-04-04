@@ -166,23 +166,25 @@ class TestParseStreamEvent:
 
     def test_text_delta(self):
         result, _, _ = self._parse({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hello"}})
-        assert result == "hello"
+        assert len(result) == 1
+        assert result[0].plain == "hello"
 
     def test_assistant_text_blocks(self):
         result, _, _ = self._parse({
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": "analysis"}]},
         })
-        assert result == "analysis"
+        assert len(result) == 1
+        assert result[0].plain == "analysis"
 
     def test_content_block_start_tool_use_deferred(self):
-        """Tool calls are deferred — content_block_start returns None and stores in pending."""
+        """Tool calls are deferred — content_block_start returns empty list and stores in pending."""
         pending = {}
         result, _, pending = self._parse(
             {"type": "content_block_start", "content_block": {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}},
             pending=pending,
         )
-        assert result is None
+        assert result == []
         assert "t1" in pending
         assert pending["t1"] == ("Read", "")
 
@@ -195,8 +197,9 @@ class TestParseStreamEvent:
             ]}},
             pending=pending,
         )
-        assert "✓" in result
-        assert "Read" in result
+        assert len(result) == 1
+        assert "✓" in result[0].plain
+        assert "Read" in result[0].plain
 
     def test_tool_result_error(self):
         """Tool errors emit red X with error preview."""
@@ -207,8 +210,9 @@ class TestParseStreamEvent:
             ]}},
             pending=pending,
         )
-        assert "✗" in result
-        assert "Bash" in result
+        assert len(result) == 1
+        assert "✗" in result[0].plain
+        assert "Bash" in result[0].plain
 
     def test_tool_cancellation_dropped(self):
         """Parallel cancellations are silently dropped."""
@@ -219,7 +223,7 @@ class TestParseStreamEvent:
             ]}},
             pending=pending,
         )
-        assert result is None
+        assert result == []
         assert "t1" not in pending
 
     def test_content_block_start_text_returns_none(self):
@@ -227,7 +231,7 @@ class TestParseStreamEvent:
             "type": "content_block_start",
             "content_block": {"type": "text", "text": ""},
         })
-        assert result is None
+        assert result == []
 
     def test_assistant_tool_use_stored_in_pending(self):
         pending = {}
@@ -237,7 +241,7 @@ class TestParseStreamEvent:
             ]}},
             pending=pending,
         )
-        assert result is None
+        assert result == []
         assert "t2" in pending
 
     def test_input_json_delta_returns_none(self):
@@ -245,7 +249,7 @@ class TestParseStreamEvent:
             "type": "content_block_delta",
             "delta": {"type": "input_json_delta", "partial_json": '{"file_path":'},
         })
-        assert result is None
+        assert result == []
 
     def test_result_stores_structured_output(self):
         holder = [""]
@@ -253,12 +257,12 @@ class TestParseStreamEvent:
             {"type": "result", "structured_output": '{"score": 18}'},
             holder=holder,
         )
-        assert result is None
+        assert result == []
         assert holder[0] == '{"score": 18}'
 
     def test_unknown_event_returns_none(self):
         result, _, _ = self._parse({"type": "system", "data": "something"})
-        assert result is None
+        assert result == []
 
 
 class TestToolInputSummary:

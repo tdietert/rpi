@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
 from rpi.display import (
     Display,
@@ -77,7 +78,7 @@ class TestStreamActivity:
             for i in range(10):
                 act.stream_line(f"line {i}")
             assert len(act._ring_buffer) == 3
-            assert list(act._ring_buffer) == ["line 7", "line 8", "line 9"]
+            assert [t.plain for t in act._ring_buffer] == ["line 7", "line 8", "line 9"]
             act.complete("success", "done")
 
     def test_stream_line_raises_after_complete(self, display):
@@ -99,9 +100,9 @@ class TestQuorumActivity:
             act.stream_line("event b", reviewer=0)
             act.stream_line("event c", reviewer=1)
             assert act._event_counts == [2, 1, 0]
-            assert list(act._ring_buffers[0]) == ["event a", "event b"]
-            assert list(act._ring_buffers[1]) == ["event c"]
-            assert list(act._ring_buffers[2]) == []
+            assert [t.plain for t in act._ring_buffers[0]] == ["event a", "event b"]
+            assert [t.plain for t in act._ring_buffers[1]] == ["event c"]
+            assert [t.plain for t in act._ring_buffers[2]] == []
             act.complete("success", "done")
 
     def test_log_has_tagged_lines(self, display, tmp_path):
@@ -128,7 +129,7 @@ class TestQuorumActivity:
         with display.quorum_activity("Review", "quorum-trunc", reviewer_count=2, ring_max=3) as act:
             for i in range(5):
                 act.stream_line(f"line {i}", reviewer=0)
-            assert list(act._ring_buffers[0]) == ["line 2", "line 3", "line 4"]
+            assert [t.plain for t in act._ring_buffers[0]] == ["line 2", "line 3", "line 4"]
             assert list(act._ring_buffers[1]) == []
             assert act._event_counts[0] == 5
             act.complete("success", "done")
@@ -143,9 +144,9 @@ class TestQuorumActivity:
             _print=lambda s: None,
             _update_live=lambda r: None,
         )
-        assert act._pad_body(["a", "b"], 5).plain == "a\nb\n\n\n"
+        assert act._pad_body([Text("a"), Text("b")], 5).plain == "a\nb\n\n\n"
         assert act._pad_body([], 3).plain == "\n\n"
-        assert act._pad_body(["x", "y", "z"], 3).plain == "x\ny\nz"
+        assert act._pad_body([Text("x"), Text("y"), Text("z")], 3).plain == "x\ny\nz"
         act._close_log()
 
     def test_build_panel_returns_panel(self, tmp_path):

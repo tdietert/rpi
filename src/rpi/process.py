@@ -15,10 +15,10 @@ from typing import Literal, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
-from rich.markup import escape as rich_escape
+from rich.text import Text
 
 from .config import Effort
-from .display import Display, StreamActivity, bold, dim, green, red
+from .display import Display, StreamActivity
 from .skills import ADD_DIR_PATH
 
 T = TypeVar("T", bound=BaseModel)
@@ -148,8 +148,8 @@ def _parse_stream_event(
     raw_line: str,
     result_holder: list[str],
     pending_tools: dict[str, tuple[str, str]],
-) -> str | None:
-    """Parse a stream-json line and return displayable text, or None.
+) -> list[Text]:
+    """Parse a stream-json line and return displayable Text objects.
 
     For ``result`` events the structured_output (or result) text is stored
     in *result_holder[0]* so the reader thread can pass it back.
@@ -161,11 +161,11 @@ def _parse_stream_event(
     """
     raw_line = raw_line.strip()
     if not raw_line:
-        return None
+        return []
     try:
         event = json.loads(raw_line)
     except json.JSONDecodeError:
-        return None
+        return []
 
     etype = event.get("type")
 
@@ -178,7 +178,7 @@ def _parse_stream_event(
         if not result_holder[0]:
             rt = event.get("result", "")
             result_holder[0] = rt if isinstance(rt, str) else json.dumps(rt)
-        return None
+        return []
 
     if etype == "content_block_start":
         cb = event.get("content_block", {})
@@ -189,17 +189,17 @@ def _parse_stream_event(
             summary = _tool_input_summary(inp)
             if tool_id:
                 pending_tools[tool_id] = (name, summary)
-        return None
+        return []
 
     if etype == "assistant":
         msg = event.get("message", {})
-        parts = []
+        parts: list[Text] = []
         for block in msg.get("content", []):
             if block.get("type") == "text":
                 for line in block["text"].split("\n"):
                     line = line.rstrip()
                     if line:
-                        parts.append(rich_escape(line))
+                        parts.append(Text(line))
             elif block.get("type") == "tool_use":
                 tool_id = block.get("id", "")
                 name = block.get("name", "tool")
@@ -207,11 +207,11 @@ def _parse_stream_event(
                 summary = _tool_input_summary(inp)
                 if tool_id:
                     pending_tools[tool_id] = (name, summary)
-        return "\n".join(parts) if parts else None
+        return parts
 
     if etype == "user":
         msg = event.get("message", {})
-        parts = []
+        parts: list[Text] = []
         for block in msg.get("content", []):
             if block.get("type") == "tool_result":
                 tool_use_id = block.get("tool_use_id", "")
@@ -230,7 +230,6 @@ def _parse_stream_event(
                     continue
 
                 name, summary = pending_tools.pop(tool_use_id, ("tool", ""))
-                label = f"{bold(name)} {dim(summary)}" if summary else bold(name)
 
                 if is_error:
                     if isinstance(content, list):
@@ -243,23 +242,35 @@ def _parse_stream_event(
                     else:
                         err_text = str(content)
                     preview = err_text[:100].split("\n")[0] + ("…" if len(err_text) > 100 else "")
-                    parts.append(f"{red('✗')} {label} {red(f'— {preview}')}")
+                    parts.append(Text.assemble(
+                        ("✗", "red"),
+                        " ",
+                        (name, "bold"),
+                        *([" ", (summary, "dim")] if summary else []),
+                        " ",
+                        (f"— {preview}", "red"),
+                    ))
                 else:
-                    parts.append(f"{green('✓')} {label}")
-        return "\n".join(parts) if parts else None
+                    parts.append(Text.assemble(
+                        ("✓", "green"),
+                        " ",
+                        (name, "bold"),
+                        *([" ", (summary, "dim")] if summary else []),
+                    ))
+        return parts
 
     if etype == "content_block_delta":
         delta = event.get("delta", {})
         if delta.get("type") == "text_delta":
             raw = delta.get("text", "")
             lines = raw.split("\n")
-            parts = []
+            parts: list[Text] = []
             for line in lines:
                 line = line.rstrip()
                 if line:
-                    parts.append(rich_escape(line))
-            return "\n".join(parts) if parts else None
-    return None
+                    parts.append(Text(line))
+            return parts
+    return []
 
 
 def _reader(
@@ -272,14 +283,12 @@ def _reader(
     pending_tools: dict[str, tuple[str, str]] = {}
     try:
         for raw_line in proc.stdout:
-            text = _parse_stream_event(raw_line, result_holder, pending_tools)
-            if text:
-                for line in text.split("\n"):
-                    if line:
-                        if reviewer is not None:
-                            q.put((reviewer, line))
-                        else:
-                            q.put(line)
+            text_lines = _parse_stream_event(raw_line, result_holder, pending_tools)
+            for text_obj in text_lines:
+                if reviewer is not None:
+                    q.put((reviewer, text_obj))
+                else:
+                    q.put(text_obj)
         proc.wait()
     finally:
         q.put(_SENTINEL)

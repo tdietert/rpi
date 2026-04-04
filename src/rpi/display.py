@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import shutil
 import threading
 import time
@@ -42,9 +41,6 @@ STATUS_STYLES: dict[DisplayStatus, str] = {
     "skipped": "dim",
     "warning": "yellow",
 }
-
-_RICH_TAG_RE = re.compile(r"\[/?[a-z][a-z_ ]*\]")
-
 
 def green(text: str) -> str:
     """Wrap text in green Rich markup, auto-escaping special characters."""
@@ -198,22 +194,26 @@ class StreamActivity(Activity):
     ) -> None:
         super().__init__(label, log_path, verbose, _print, _update_live)
         self._ring_max = ring_max
-        self._ring_buffer: deque[str] = deque(maxlen=ring_max)
+        self._ring_buffer: deque[Text] = deque(maxlen=ring_max)
         self._event_count = 0
         self._last_event_time = time.monotonic()
 
-    def stream_line(self, text: str) -> None:
+    def stream_line(self, text: Text | str) -> None:
         if self._completed:
             raise RuntimeError("Activity already completed")
         self._event_count += 1
         self._last_event_time = time.monotonic()
-        self._ring_buffer.append(text)
-        self._write_log(_RICH_TAG_RE.sub("", text) + "\n")
+        text_obj = text if isinstance(text, Text) else Text(str(text))
+        self._ring_buffer.append(text_obj)
+        self._write_log(text_obj.plain + "\n")
         self._update_live(self._build_panel())
 
-    def _pad_body(self, lines: deque[str], height: int) -> str:
-        padded = list(lines)[:height] + [""] * max(0, height - len(lines))
-        return "\n".join(padded)
+    def _pad_body(self, lines: deque[Text], height: int) -> Text:
+        visible = list(lines)[:height]
+        padding_count = max(0, height - len(visible))
+        if padding_count:
+            visible.extend([Text("")] * padding_count)
+        return Text("\n").join(visible)
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
@@ -223,7 +223,7 @@ class StreamActivity(Activity):
         chrome_lines = 4
         effective = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
 
-        body = Text.from_markup(self._pad_body(self._ring_buffer, effective)) if self._ring_buffer else Text.from_markup(dim("waiting..."))
+        body = self._pad_body(self._ring_buffer, effective) if self._ring_buffer else Text("waiting...", style="dim")
         idle = time.monotonic() - self._last_event_time
         idle_suffix = f", idle {idle:.0f}s" if idle > 10 else ""
         inner = Panel(
@@ -255,20 +255,24 @@ class QuorumActivity(Activity):
         super().__init__(label, log_path, verbose, _print, _update_live)
         self.reviewer_count = reviewer_count
         self._ring_max = ring_max
-        self._ring_buffers: list[deque[str]] = [deque(maxlen=ring_max) for _ in range(reviewer_count)]
+        self._ring_buffers: list[deque[Text]] = [deque(maxlen=ring_max) for _ in range(reviewer_count)]
         self._event_counts: list[int] = [0] * reviewer_count
 
-    def stream_line(self, text: str, reviewer: int) -> None:
+    def stream_line(self, text: Text | str, reviewer: int) -> None:
         if self._completed:
             raise RuntimeError("Activity already completed")
         self._event_counts[reviewer] += 1
-        self._ring_buffers[reviewer].append(text)
-        self._write_log(f"[reviewer {reviewer}] {_RICH_TAG_RE.sub('', text)}\n")
+        text_obj = text if isinstance(text, Text) else Text(str(text))
+        self._ring_buffers[reviewer].append(text_obj)
+        self._write_log(f"[reviewer {reviewer}] {text_obj.plain}\n")
         self._update_live(self._build_panel())
 
-    def _pad_body(self, lines: list[str] | deque[str], height: int) -> Text:
-        padded = list(lines)[:height] + [""] * max(0, height - len(lines))
-        return Text.from_markup("\n".join(padded))
+    def _pad_body(self, lines: list[Text] | deque[Text], height: int) -> Text:
+        visible = list(lines)[:height]
+        padding_count = max(0, height - len(visible))
+        if padding_count:
+            visible.extend([Text("")] * padding_count)
+        return Text("\n").join(visible)
 
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
