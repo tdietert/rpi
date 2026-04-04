@@ -335,7 +335,7 @@ def parse_plan_from_markdown(text: str) -> Plan:
             for vm in re.finditer(r"-\s*\[.\]\s*(.+)", verif_m.group(1)):
                 verification.append(vm.group(1).strip())
 
-        # Extract verification commands
+        # Extract verification commands (bulleted list or inline format)
         vcmd_m = re.search(
             r"\*\*Verification Commands:\*\*\s*\n((?:\s*-\s*`.+`\s*\n?)+)", phase_body
         )
@@ -343,6 +343,13 @@ def parse_plan_from_markdown(text: str) -> Plan:
         if vcmd_m:
             for cm in re.finditer(r"-\s*`(.+?)`", vcmd_m.group(1)):
                 verification_commands.append(cm.group(1).strip())
+        else:
+            # Inline format: **Verification Commands:** `cmd1 && cmd2`
+            vcmd_inline = re.search(
+                r"\*\*Verification Commands:\*\*\s*`(.+?)`", phase_body
+            )
+            if vcmd_inline:
+                verification_commands.append(vcmd_inline.group(1).strip())
 
         # Extract tasks
         task_chunks = re.split(r"(?m)^#{2,6}\s+Task\s+([\d.]+):\s*(.+)", phase_body)

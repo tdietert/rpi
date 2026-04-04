@@ -163,6 +163,21 @@ class TestMissingOptionalFields:
         assert parsed.phases[0].verification_commands == []
 
 
+    def test_inline_verification_commands(self):
+        """Verification commands written inline (not as a bulleted list) are parsed."""
+        plan = _make_plan()
+        md = _serialize(plan)
+        # Replace the bulleted list format with inline format
+        md = md.replace(
+            "**Verification Commands:**\n- `uv run ruff check src/`\n- `uv run pytest`",
+            "**Verification Commands:** `uv run ruff check src/ && uv run pytest`",
+        )
+        parsed = parse_plan_from_markdown(md)
+        assert parsed.phases[0].verification_commands == [
+            "uv run ruff check src/ && uv run pytest"
+        ]
+
+
 class TestErrorCases:
     def test_missing_title(self):
         md = "## Overview\n\nSome overview\n"
