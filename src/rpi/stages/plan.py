@@ -37,7 +37,12 @@ class PlanStage(Stage):
             research_context = f" Use research at {ctx.research_path} for context."
 
         # Compute plan file path in the work directory
-        kebab = re.sub(r"[^a-z0-9]+", "-", config.prompt.lower()).strip("-")[:60]
+        raw = config.prompt
+        if not raw and ctx.spec_path:
+            raw = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", ctx.spec_path.stem)
+        if not raw and ctx.research_path:
+            raw = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", ctx.research_path.stem)
+        kebab = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:60]
         filename = f"{today}-{kebab}.md"
         abs_path = ctx.work_dir / filename
 
