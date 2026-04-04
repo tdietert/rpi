@@ -150,26 +150,11 @@ def _list_snapshots() -> None:
         try:
             snap = load_snapshot(snap_path.parent)
             p = snap.progress
-            stages = []
-            if p.research_done:
-                stages.append("research")
-            if p.spec_done:
-                stages.append("spec")
-            if p.plan_done:
-                stages.append("plan")
-            if p.plan_review_done:
-                stages.append("review")
-            if p.implementation_done:
-                stages.append("impl")
-            elif p.implementation and p.implementation.completed_phases:
-                stages.append(f"impl({len(p.implementation.completed_phases)} phases)")
-            if p.review_fix_done:
-                stages.append("fix")
-            if p.commit_done:
-                stages.append("commit")
-            if p.push_or_pr_done:
-                stages.append("pr")
-            progress_str = ", ".join(stages) if stages else "(none)"
+            done = p.completed_stages()
+            labels = [s.label for s in done]
+            if not p.implementation_done and p.implementation and p.implementation.completed_phases:
+                labels.append(f"Implement({len(p.implementation.completed_phases)} phases)")
+            progress_str = ", ".join(labels) if labels else "(none)"
             title = Path(snap.config.plan_path).stem[:38] if snap.config.plan_path else (snap.config.prompt[:38] if snap.config.prompt else snap_path.parent.name)
             table.add_row(title, snap.timestamp, progress_str, str(snap_path.parent))
         except Exception as e:
@@ -280,25 +265,18 @@ def _run() -> None:
         plan = plan_restored
         disp = Display(verbose=args.verbose, log_dir=snap_dir / "logs")
 
-        # Set start_from for completed early stages
-        if progress.plan_done:
-            config.start_from = StageName.preflight
-        elif progress.spec_done:
-            config.start_from = StageName.plan
-        elif progress.research_done:
-            config.start_from = StageName.spec
-
-        # Set skip flags for completed later stages
-        if progress.plan_review_done:
-            config.skip_plan_review = True
-        if progress.implementation_done:
-            config.skip_implement = True
-        if progress.review_fix_done:
-            config.skip_fix = True
-        if progress.commit_done:
-            config.skip_commit = True
-        if progress.push_or_pr_done:
-            config.skip_pr = True
+        # Advance start_from past completed early stages, set skip
+        # flags for completed later stages.
+        done = set(progress.completed_stages())
+        for i, stage_cls in enumerate(PIPELINE):
+            sn = stage_cls.name
+            if sn not in done:
+                continue
+            next_stage = PIPELINE[i + 1].name if i + 1 < len(PIPELINE) else None
+            if sn.skip_config_key:
+                setattr(config, sn.skip_config_key, True)
+            elif next_stage:
+                config.start_from = next_stage
 
         if progress.implementation and not progress.implementation_done:
             resume_completed_phases = set(progress.implementation.completed_phases)

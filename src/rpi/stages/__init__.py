@@ -112,59 +112,39 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
 
     rows: list[tuple[str, str, str]] = []
 
-    # Research
-    if skips_stage(config, StageName.research):
-        rows.append(("Research", "", skip_label()))
-    elif ctx.progress.research_done:
-        rows.append(("Research", icon(True), "done"))
-    else:
-        rows.append(("Research", "", "in progress"))
-
-    # Spec
-    if skips_stage(config, StageName.spec):
-        rows.append(("Spec", "", skip_label()))
-    elif ctx.progress.spec_done:
-        rows.append(("Spec", icon(True), "done"))
-    else:
-        rows.append(("Spec", "", "in progress"))
-
-    # Plan
-    if skips_stage(config, StageName.plan):
-        rows.append(("Plan", "", skip_label()))
-    elif ctx.progress.plan_done:
-        rows.append(("Plan", icon(True), "done"))
-    else:
-        rows.append(("Plan", "", "in progress"))
+    for sn in (StageName.research, StageName.spec, StageName.plan):
+        if skips_stage(config, sn):
+            rows.append((sn.label, "", skip_label()))
+        elif sn.progress_key and getattr(ctx.progress, sn.progress_key, False):
+            rows.append((sn.label, icon(True), "done"))
+        else:
+            rows.append((sn.label, "", "in progress"))
 
     if meta is not None:
-        # Plan review
         if skips_stage(config, StageName.plan_review):
-            rows.append(("Plan Review", "", skip_label()))
+            rows.append((StageName.plan_review.label, "", skip_label()))
         else:
             ok = ctx.review_score is not None and ctx.review_score >= config.min_score
             detail = f"score {ctx.review_score}/10, {ctx.review_iters} iter"
-            rows.append(("Plan Review", icon(ok), detail))
+            rows.append((StageName.plan_review.label, icon(ok), detail))
 
-        # Implementation
         if skips_stage(config, StageName.implement):
-            rows.append(("Implement", "", skip_label()))
+            rows.append((StageName.implement.label, "", skip_label()))
         else:
             n_phases = len(ctx.plan.phases) if ctx.plan else 0
-            rows.append(("Implement", icon(True), f"{n_phases} phases"))
+            rows.append((StageName.implement.label, icon(True), f"{n_phases} phases"))
 
-    # Review-fix
     if skips_stage(config, StageName.review_fix):
-        rows.append(("Review-Fix", "", skip_label()))
+        rows.append((StageName.review_fix.label, "", skip_label()))
     else:
         ok = ctx.fix_status == "clean"
         detail = f"score {ctx.fix_score}/10, {ctx.fix_iters} iter"
         if ctx.fix_status != "clean":
             detail += f" ({ctx.fix_status})"
-        rows.append(("Review-Fix", icon(ok), detail))
+        rows.append((StageName.review_fix.label, icon(ok), detail))
 
-    # Commit
     if skips_stage(config, StageName.commit):
-        rows.append(("Commit", "", skip_label()))
+        rows.append((StageName.commit.label, "", skip_label()))
     elif ctx.commit_result:
         ok = ctx.commit_result.status == "success"
         detail = (
@@ -172,17 +152,16 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
             if ok
             else ctx.commit_result.status
         )
-        rows.append(("Commit", icon(ok), detail))
+        rows.append((StageName.commit.label, icon(ok), detail))
 
-    # Push / PR
     if config.push:
         rows.append(("Push", icon(ctx.push_ok), "done" if ctx.push_ok else "failed"))
     elif skips_stage(config, StageName.push_pr):
-        rows.append(("PR", "", skip_label()))
+        rows.append((StageName.push_pr.label, "", skip_label()))
     elif ctx.pr_result:
         ok = ctx.pr_result.status == "success"
         detail = ctx.pr_result.pr_url if ok else ctx.pr_result.status
-        rows.append(("PR", icon(ok), detail))
+        rows.append((StageName.push_pr.label, icon(ok), detail))
 
     footer = {}
     if config.worktree:

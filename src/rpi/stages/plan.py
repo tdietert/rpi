@@ -36,14 +36,10 @@ class PlanStage(Stage):
         if not spec_context and ctx.research_path and ctx.research_path.is_file():
             research_context = f" Use research at {ctx.research_path} for context."
 
-        # Compute plan file path from task description
+        # Compute plan file path in the work directory
         kebab = re.sub(r"[^a-z0-9]+", "-", config.prompt.lower()).strip("-")[:60]
-        rel_path = Path(f".claude/plans/{today}-{kebab}.md")
-        if config.worktree:
-            abs_path = Path(config.worktree) / rel_path
-        else:
-            abs_path = rel_path.resolve()
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        filename = f"{today}-{kebab}.md"
+        abs_path = ctx.work_dir / filename
 
         spec_path_str = str(ctx.spec_path) if ctx.spec_path else ""
         research_path_str = str(ctx.research_path) if ctx.research_path else ""
@@ -60,7 +56,7 @@ class PlanStage(Stage):
             prompt = (
                 f"Run /rpi-plan to create an implementation plan."
                 f"{spec_context}{research_context}"
-                f" Write the plan to `{rel_path}`."
+                f" Write the plan to `{abs_path}`."
                 f" Task: {config.prompt}"
             )
 
@@ -76,7 +72,7 @@ class PlanStage(Stage):
 
             if not abs_path.is_file():
                 raise RuntimeError(
-                    f"Agent did not write plan file to {rel_path}. "
+                    f"Agent did not write plan file to {abs_path}. "
                     "Check the plan activity log for errors."
                 )
             plan = parse_plan_from_markdown(abs_path.read_text())
@@ -84,7 +80,7 @@ class PlanStage(Stage):
         ctx.display.info(f"{plan.title} ({len(plan.phases)} phases)")
 
         # Validate with auto-fix
-        plan = self._validate_with_fix(plan, abs_path, rel_path, ctx)
+        plan = self._validate_with_fix(plan, abs_path, ctx)
 
         ctx.display.info(f"Plan written to: {filelink(abs_path)}")
 
@@ -95,7 +91,7 @@ class PlanStage(Stage):
                 break
 
             update_prompt = (
-                f"Update the plan at `{rel_path}` based on this feedback: {feedback}\n\n"
+                f"Update the plan at `{abs_path}` based on this feedback: {feedback}\n\n"
                 f"Read the current plan, re-investigate as needed, then edit the file. "
                 f"Maintain the exact markdown format — the file is parsed deterministically."
             )
@@ -110,7 +106,7 @@ class PlanStage(Stage):
                 act.complete("success", "plan updated")
 
             plan = parse_plan_from_markdown(abs_path.read_text())
-            plan = self._validate_with_fix(plan, abs_path, rel_path, ctx)
+            plan = self._validate_with_fix(plan, abs_path, ctx)
             ctx.display.info(f"Plan updated: {filelink(abs_path)}")
 
         # Set context for downstream stages
@@ -124,7 +120,7 @@ class PlanStage(Stage):
         ctx.progress.plan_done = True
 
     def _validate_with_fix(
-        self, plan: Plan, abs_path: Path, rel_path: Path, ctx,
+        self, plan: Plan, abs_path: Path, ctx,
     ) -> Plan:
         """Validate plan structure, auto-fix up to 3 times by editing the file."""
         max_attempts = 3
@@ -146,7 +142,7 @@ class PlanStage(Stage):
                 f"Fixing plan structure (attempt {attempt + 1}/{max_attempts})..."
             )
             fix_prompt = (
-                f"The plan file at `{rel_path}` has structural issues that prevent "
+                f"The plan file at `{abs_path}` has structural issues that prevent "
                 "automated execution. Fix ONLY these specific issues by editing "
                 "the plan file:\n\n"
                 + "\n".join(f"- {e}" for e in errors)

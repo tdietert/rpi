@@ -45,7 +45,7 @@ def render_banner(
         if config.worktree:
             fields.append(("Worktree", config.worktree))
         skips = [
-            S.name.value.replace("_", "-") for S in PIPELINE
+            S.name.label for S in PIPELINE
             if skips_stage(config, S.name)
         ]
         if skips:
@@ -82,21 +82,8 @@ def _resume_fields(
     if resume_completed_phases:
         fields.append(("Resuming", f"skipping phases {sorted(resume_completed_phases)}"))
 
-    completed_stages = []
-    stage_flags = [
-        (progress.research_done, "research"),
-        (progress.spec_done, "spec"),
-        (progress.plan_done, "plan"),
-        (progress.plan_review_done, "plan-review"),
-        (progress.implementation_done, "implement"),
-        (progress.review_fix_done, "review-fix"),
-        (progress.commit_done, "commit"),
-        (progress.push_or_pr_done, "push/pr"),
-    ]
-    for done, label in stage_flags:
-        if done:
-            completed_stages.append(label)
-    if completed_stages:
-        fields.append(("Done", ", ".join(completed_stages)))
+    done = progress.completed_stages()
+    if done:
+        fields.append(("Done", ", ".join(s.label for s in done)))
     fields.append(("Work", filelink(work_dir)))
     return fields

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .stage_name import StageName
+
 
 class SnapshotPhaseProgress(BaseModel):
     """Tracks which implementation phases have completed."""
@@ -30,3 +32,10 @@ class SnapshotStageProgress(BaseModel):
     research_done: bool = False
     spec_done: bool = False
     plan_done: bool = False
+
+    def completed_stages(self) -> list[StageName]:
+        """Return stages marked done, in pipeline order."""
+        return [
+            s for s in StageName
+            if s.progress_key and getattr(self, s.progress_key, False)
+        ]

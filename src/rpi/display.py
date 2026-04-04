@@ -407,7 +407,7 @@ class Display:
         self._stdout.print(panel)
 
     @contextmanager
-    def activity(self, label: str, log_name: str, ring_max: int = 8) -> Iterator[StreamActivity]:
+    def activity(self, label: str, log_name: str, ring_max: int = 30) -> Iterator[StreamActivity]:
         with self._lock:
             if self._active is not None:
                 raise RuntimeError("Another activity is already active")

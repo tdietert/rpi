@@ -19,11 +19,12 @@ class PlanReviewStage(Stage):
     def run(self, ctx) -> None:
         config = ctx.config
 
-        # Copy plan to work directory so agents can edit it
-        # (Claude Code denies writes to .claude/)
+        # Agents cannot edit files inside .claude/, so ensure the plan
+        # lives in work_dir before handing it to reviewers.
         work_plan = ctx.work_dir / config.plan_path.name
-        shutil.copy2(config.plan_path, work_plan)
-        ctx.display.info(f"Plan copied to: {filelink(work_plan)}")
+        if config.plan_path != work_plan:
+            shutil.copy2(config.plan_path, work_plan)
+            ctx.display.info(f"Plan copied to: {filelink(work_plan)}")
 
         ctx.display.stage_header(
             f"Stage 1: Plan Review (target >= {config.min_score}/10, "
@@ -64,8 +65,9 @@ class PlanReviewStage(Stage):
         )
         self._snapshot(ctx)
 
-        # Copy reviewed plan back to original location
-        shutil.copy2(work_plan, config.plan_path)
+        # Copy reviewed plan back to original location if it was external
+        if config.plan_path != work_plan:
+            shutil.copy2(work_plan, config.plan_path)
 
         # Re-parse after review -- review may have modified the plan structure
         ctx.display.info("Re-parsing plan after review modifications...")
