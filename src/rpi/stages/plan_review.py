@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from ..display import green
+import shutil
+
+from ..display import filelink, green
 from ..plan import run_plan_processing
 from ..progress import SnapshotReviewProgress
 from ..review import ReviewLoopConfig, run_review_loop
@@ -17,6 +19,12 @@ class PlanReviewStage(Stage):
     def run(self, ctx) -> None:
         config = ctx.config
 
+        # Copy plan to work directory so agents can edit it
+        # (Claude Code denies writes to .claude/)
+        work_plan = ctx.work_dir / config.plan_path.name
+        shutil.copy2(config.plan_path, work_plan)
+        ctx.display.info(f"Plan copied to: {filelink(work_plan)}")
+
         ctx.display.stage_header(
             f"Stage 1: Plan Review (target >= {config.min_score}/10, "
             f"max {config.max_review_iters} iter)"
@@ -24,7 +32,7 @@ class PlanReviewStage(Stage):
 
         loop_config = ReviewLoopConfig(
             loop_type="plan_review",
-            review_prompt=f"Run /rpi-plan-review on the plan file at {config.plan_path}.",
+            review_prompt=f"Run /rpi-plan-review on the plan file at {work_plan}.",
             history_noun="changes",
             apply_label="Applying review feedback to plan...",
             apply_noun="changes",
@@ -33,11 +41,11 @@ class PlanReviewStage(Stage):
             max_iters=config.max_review_iters,
             min_score=config.min_score,
             review_quorum=config.review_quorum,
-            plan_path=config.plan_path,
+            plan_path=work_plan,
             work_dir=ctx.work_dir,
             dry_run=config.dry_run,
             worktree=config.worktree,
-            apply_path=config.plan_path,
+            apply_path=work_plan,
         )
         result = run_review_loop(loop_config, ctx.display)
 
@@ -55,6 +63,9 @@ class PlanReviewStage(Stage):
             last_score=ctx.review_score,
         )
         self._snapshot(ctx)
+
+        # Copy reviewed plan back to original location
+        shutil.copy2(work_plan, config.plan_path)
 
         # Re-parse after review -- review may have modified the plan structure
         ctx.display.info("Re-parsing plan after review modifications...")
