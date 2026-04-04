@@ -457,6 +457,25 @@ def run_claude_with_display(
     return run_claude_structured(prompt=prompt, schema=schema, **kwargs)
 
 
+def run_claude_streaming(
+    prompt: str,
+    effort: Effort = "medium",
+    work_dir: Path | None = None,
+    worktree: str = "",
+    model: str | None = None,
+    activity: StreamActivity | None = None,
+) -> None:
+    """Run Claude and stream output. No structured output expected.
+
+    The agent performs its work through tool use (writing files, running
+    commands) rather than producing a structured result.
+    """
+    handle = start_claude(prompt, effort=effort, work_dir=work_dir, worktree=worktree, model=model)
+    for line in handle.lines():
+        if activity is not None:
+            activity.stream_line(line)
+
+
 class QuorumProcess:
     """Handle for N parallel Claude CLI subprocesses (review quorum)."""
 

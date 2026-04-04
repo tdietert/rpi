@@ -1,17 +1,17 @@
 ---
 name: rpi-plan
-description: Create an implementation plan formatted for the automated rpi pipeline. The plan markdown is extracted into a ParsedPlan JSON schema by a separate Claude instance, then validated deterministically.
+description: Create an implementation plan formatted for the automated rpi pipeline. The plan markdown is parsed deterministically and validated for structural correctness.
 model: opus
 allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion
 ---
 
 # Create RPI-Compatible Implementation Plan
 
-You are tasked with creating a detailed implementation plan through an interactive process. The plan will be consumed by the **rpi.py automated pipeline** (plan-review-implement-fix). After you write the plan markdown, a separate Claude instance extracts it into a `ParsedPlan` JSON schema via `--json-schema` mode, then deterministic validation runs on the result.
+You are tasked with creating a detailed implementation plan through an interactive process. The plan will be consumed by the **rpi.py automated pipeline** (plan-review-implement-fix). After you write the plan markdown, it is parsed deterministically into a structured representation, then validation runs on the result.
 
 ## How This Differs from /plan
 
-Same interactive investigation process as `/plan`, but the output markdown must be structured well enough for a separate Claude instance to extract it into a `ParsedPlan` JSON schema. After extraction, `validate_parsed_plan()` runs deterministic checks (sequential phase numbering, unique task IDs, no cross-group file overlap). Failures block the pipeline.
+Same interactive investigation process as `/plan`, but the output markdown must be structured for deterministic parsing. After parsing, `validate_plan()` runs deterministic checks (sequential phase numbering, unique task IDs, no cross-group file overlap). Failures block the pipeline.
 
 ---
 
@@ -134,7 +134,7 @@ Get feedback on structure before proceeding.
 
 Determine filename: `.claude/plans/YYYY-MM-DD-<description>.md`
 
-Write the plan following the template below. The markdown must be structured well enough for a separate Claude instance to extract it into the `ParsedPlan` JSON schema.
+Write the plan following the template below. The markdown is parsed deterministically — follow the template exactly.
 
 ### Step 6: Present the Plan
 
@@ -236,7 +236,7 @@ status: draft
 
 ## Structural Validation Rules
 
-The plan parser runs three cross-item validation checks after schema extraction. All three MUST pass. Violations will block the pipeline.
+The plan parser runs three cross-item validation checks after parsing. All three MUST pass. Violations will block the pipeline.
 
 ### Rule 1: Sequential Phase Numbering
 
@@ -309,7 +309,7 @@ Before considering the plan done, verify:
 - Use checkboxes (- [ ]) for all actionable items so the implementer can track progress
 - Reference actual code patterns from the codebase, not generic approaches
 - If the research file had open questions, try to resolve them during planning or carry them forward
-- The plan markdown will be extracted into a `ParsedPlan` JSON schema by a separate Claude instance -- follow the template closely so extraction is reliable
+- The plan markdown is parsed deterministically -- follow the template exactly so parsing succeeds
 - **Verification commands must use relative paths, never absolute paths.** The rpi pipeline may execute inside a git worktree, not the main repo checkout. Absolute paths like `cd /Users/foo/project && npm test` will run against the main repo (missing the worktree's changes). Use relative commands like `npm test` or `cd subdir && npm test` — rpi.py sets the working directory automatically.
 - **Verification commands run in a bare shell.** The rpi pipeline runs verification commands via `subprocess.run(cmd, shell=True, cwd=worktree)` — no virtual environment activated, no project-specific shell setup. Before writing verification commands, check how the project actually invokes its toolchain (Makefile, package.json scripts, build tool wrappers, etc.) and use the same invocation. If the project uses a runtime wrapper (e.g., `uv run`, `poetry run`, `npx`, `nix run`), verification commands must use it too.
 
