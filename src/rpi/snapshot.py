@@ -66,9 +66,9 @@ class Snapshot(BaseModel):
             if config_data.get("plan_path"):
                 config_data["start_from"] = StageName.preflight.value
             elif skip_spec:
-                config_data["start_from"] = StageName.plan_draft.value
+                config_data["start_from"] = StageName.plan.value
             elif skip_research:
-                config_data["start_from"] = StageName.spec_draft.value
+                config_data["start_from"] = StageName.spec.value
             else:
                 config_data["start_from"] = StageName.research.value
         data["version"] = 3
@@ -191,7 +191,7 @@ def restore_from_snapshot(
                     display.error(f"Plan file not found: {config.plan_path}")
                 sys.exit(1)
         config.plan_path = resolved
-    elif config.prompt and snapshot.progress.plan_draft_done:
+    elif config.prompt and snapshot.progress.plan_done:
         snap_plan = snap_dir / snapshot.copied_files.get("plan", "plan.md")
         if snap_plan.is_file():
             config.plan_path = snap_plan

@@ -7,8 +7,8 @@ from enum import Enum
 
 class StageName(Enum):
     research = "research"
-    spec_draft = "spec_draft"
-    plan_draft = "plan_draft"
+    spec = "spec"
+    plan = "plan"
     preflight = "preflight"
     plan_review = "plan_review"
     implement = "implement"

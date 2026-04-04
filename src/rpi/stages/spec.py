@@ -22,14 +22,14 @@ class SpecResult(BaseModel):
 
 
 class SpecStage(Stage):
-    name = StageName.spec_draft
-    label = "Spec Draft"
+    name = StageName.spec
+    label = "Spec"
 
     def run(self, ctx) -> None:
         config = ctx.config
         prompt = self._build_prompt(config, ctx.research_path)
 
-        with ctx.display.activity("Spec Draft", "spec-draft") as act:
+        with ctx.display.activity("Spec", "spec") as act:
             result = run_claude_structured(
                 prompt=prompt,
                 schema=SpecResult,
@@ -58,7 +58,7 @@ class SpecStage(Stage):
                 "Read the existing spec file, then update it based on the "
                 "feedback above. Re-investigate as needed."
             )
-            with ctx.display.activity("Spec Draft (update)", "spec-draft-update") as act:
+            with ctx.display.activity("Spec (update)", "spec-update") as act:
                 result = run_claude_structured(
                     prompt=update_prompt,
                     schema=SpecResult,
@@ -77,7 +77,7 @@ class SpecStage(Stage):
 
         ctx.spec_path = path
         ctx.config.spec_path = path
-        ctx.progress.spec_draft_done = True
+        ctx.progress.spec_done = True
 
     def _build_prompt(self, config, research_path: Path | None) -> str:
         parts = ["Run /rpi-spec to create an architectural spec"]

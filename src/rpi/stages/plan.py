@@ -1,4 +1,4 @@
-"""Plan draft stage: generate a structured implementation plan via Claude."""
+"""Plan stage: generate a structured implementation plan via Claude."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ and verification commands
 
 
 class PlanStage(Stage):
-    name = StageName.plan_draft
-    label = "Plan Draft"
+    name = StageName.plan
+    label = "Plan"
 
     def run(self, ctx) -> None:
         config = ctx.config
@@ -72,7 +72,7 @@ class PlanStage(Stage):
         parts.append(f"## Instructions\n\n{_PLAN_INSTRUCTIONS}")
         prompt = "\n".join(parts)
 
-        with ctx.display.activity("Plan Draft", "plan-draft") as act:
+        with ctx.display.activity("Plan", "plan") as act:
             plan = run_claude_structured(
                 prompt=prompt,
                 schema=Plan,
@@ -114,7 +114,7 @@ class PlanStage(Stage):
                 f"Re-investigate as needed using your tools. "
                 f"Fill in ALL fields of the Plan schema."
             )
-            with ctx.display.activity("Plan Draft (update)", "plan-draft-update") as act:
+            with ctx.display.activity("Plan (update)", "plan-update") as act:
                 plan = run_claude_structured(
                     prompt=update_prompt,
                     schema=Plan,
@@ -138,7 +138,7 @@ class PlanStage(Stage):
             num_phases=len(plan.phases),
             completed_phases=0,
         )
-        ctx.progress.plan_draft_done = True
+        ctx.progress.plan_done = True
 
     def _validate_with_fix(self, plan: Plan, ctx) -> Plan:
         """Validate plan structure, auto-fix up to 3 times."""

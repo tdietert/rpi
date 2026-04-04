@@ -200,11 +200,13 @@ class StreamActivity(Activity):
         self._ring_max = ring_max
         self._ring_buffer: deque[str] = deque(maxlen=ring_max)
         self._event_count = 0
+        self._last_event_time = time.monotonic()
 
     def stream_line(self, text: str) -> None:
         if self._completed:
             raise RuntimeError("Activity already completed")
         self._event_count += 1
+        self._last_event_time = time.monotonic()
         self._ring_buffer.append(text)
         self._write_log(_RICH_TAG_RE.sub("", text) + "\n")
         self._update_live(self._build_panel())
@@ -222,11 +224,13 @@ class StreamActivity(Activity):
         effective = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
 
         body = Text.from_markup(self._pad_body(self._ring_buffer, effective)) if self._ring_buffer else Text.from_markup(dim("waiting..."))
+        idle = time.monotonic() - self._last_event_time
+        idle_suffix = f", idle {idle:.0f}s" if idle > 10 else ""
         inner = Panel(
             body,
-            title=f"Agent ({self._event_count} events)",
+            title=f"Agent ({self._event_count} events{idle_suffix})",
             height=effective + 2,
-            border_style="dim",
+            border_style="yellow" if idle > 30 else "dim",
         )
         return Panel(
             inner,

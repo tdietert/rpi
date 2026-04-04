@@ -28,5 +28,5 @@ class SnapshotStageProgress(BaseModel):
     commit_done: bool = False
     push_or_pr_done: bool = False
     research_done: bool = False
-    spec_draft_done: bool = False
-    plan_draft_done: bool = False
+    spec_done: bool = False
+    plan_done: bool = False

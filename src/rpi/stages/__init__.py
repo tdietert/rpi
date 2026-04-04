@@ -120,21 +120,21 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     else:
         rows.append(("Research", "", "in progress"))
 
-    # Spec Draft
-    if skips_stage(config, StageName.spec_draft):
-        rows.append(("Spec Draft", "", skip_label()))
-    elif ctx.progress.spec_draft_done:
-        rows.append(("Spec Draft", icon(True), "done"))
+    # Spec
+    if skips_stage(config, StageName.spec):
+        rows.append(("Spec", "", skip_label()))
+    elif ctx.progress.spec_done:
+        rows.append(("Spec", icon(True), "done"))
     else:
-        rows.append(("Spec Draft", "", "in progress"))
+        rows.append(("Spec", "", "in progress"))
 
-    # Plan Draft
-    if skips_stage(config, StageName.plan_draft):
-        rows.append(("Plan Draft", "", skip_label()))
-    elif ctx.progress.plan_draft_done:
-        rows.append(("Plan Draft", icon(True), "done"))
+    # Plan
+    if skips_stage(config, StageName.plan):
+        rows.append(("Plan", "", skip_label()))
+    elif ctx.progress.plan_done:
+        rows.append(("Plan", icon(True), "done"))
     else:
-        rows.append(("Plan Draft", "", "in progress"))
+        rows.append(("Plan", "", "in progress"))
 
     if meta is not None:
         # Plan review

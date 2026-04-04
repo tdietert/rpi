@@ -85,8 +85,8 @@ def _resume_fields(
     completed_stages = []
     stage_flags = [
         (progress.research_done, "research"),
-        (progress.spec_draft_done, "spec-draft"),
-        (progress.plan_draft_done, "plan-draft"),
+        (progress.spec_done, "spec"),
+        (progress.plan_done, "plan"),
         (progress.plan_review_done, "plan-review"),
         (progress.implementation_done, "implement"),
         (progress.review_fix_done, "review-fix"),

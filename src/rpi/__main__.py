@@ -152,10 +152,10 @@ def _list_snapshots() -> None:
             stages = []
             if p.research_done:
                 stages.append("research")
-            if p.spec_draft_done:
-                stages.append("spec-draft")
-            if p.plan_draft_done:
-                stages.append("plan-draft")
+            if p.spec_done:
+                stages.append("spec")
+            if p.plan_done:
+                stages.append("plan")
             if p.plan_review_done:
                 stages.append("review")
             if p.implementation_done:
@@ -196,7 +196,7 @@ def _collect_prompt(args: argparse.Namespace, disp: Display) -> str:
             disp.error(
                 "No task description provided. Usage:\n"
                 "  rpi --plan <plan-file>   # run with existing plan\n"
-                "  rpi --spec <spec-file>   # start from plan draft\n"
+                "  rpi --spec <spec-file>   # start from plan\n"
                 "  rpi --prompt \"...\"        # start from research\n"
                 "  rpi                       # interactive mode"
             )
@@ -207,8 +207,8 @@ def _collect_prompt(args: argparse.Namespace, disp: Display) -> str:
 
 # "If this arg has a value, the user provided the output of this stage"
 _ARG_STAGE_OUTPUT: dict[str, StageName] = {
-    "plan_path":     StageName.plan_draft,
-    "spec":          StageName.spec_draft,
+    "plan_path":     StageName.plan,
+    "spec":          StageName.spec,
     "research":      StageName.research,
 }
 
@@ -280,12 +280,12 @@ def _run() -> None:
         disp = Display(verbose=args.verbose, log_dir=snap_dir / "logs")
 
         # Set start_from for completed early stages
-        if progress.plan_draft_done:
+        if progress.plan_done:
             config.start_from = StageName.preflight
-        elif progress.spec_draft_done:
-            config.start_from = StageName.plan_draft
+        elif progress.spec_done:
+            config.start_from = StageName.plan
         elif progress.research_done:
-            config.start_from = StageName.spec_draft
+            config.start_from = StageName.spec
 
         # Set skip flags for completed later stages
         if progress.plan_review_done:
@@ -304,7 +304,7 @@ def _run() -> None:
 
         if config.plan_path:
             meta = parse_plan_metadata(config.plan_path)
-        elif progress.plan_draft_done:
+        elif progress.plan_done:
             meta = PlanMetadata(title=config.prompt[:60], num_phases=0, completed_phases=0)
         else:
             meta = None
