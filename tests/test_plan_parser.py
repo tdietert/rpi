@@ -137,6 +137,33 @@ class TestHeadingDepthVariations:
         assert len(parsed.phases[0].tasks) == 2
 
 
+class TestSubBullets:
+    def test_sub_bullets_captured_in_step(self):
+        """Indented sub-bullets under a checkbox are included in the step text."""
+        plan = _make_plan()
+        md = _serialize(plan)
+        # Replace a flat step with one that has sub-bullets
+        md = md.replace(
+            "- [ ] Define WidgetProtocol",
+            "- [ ] Define WidgetProtocol:\n  - field: name (str)\n  - field: value (int)",
+        )
+        parsed = parse_plan_from_markdown(md)
+        step = parsed.phases[0].tasks[0].steps[0]
+        assert step.startswith("Define WidgetProtocol:")
+        assert "  - field: name (str)" in step
+        assert "  - field: value (int)" in step
+
+    def test_sub_bullets_round_trip(self):
+        """Steps with sub-bullets survive serialize -> parse."""
+        plan = _make_plan()
+        plan.phases[0].tasks[0].steps[0] = (
+            "Define WidgetProtocol:\n  - field: name (str)\n  - field: value (int)"
+        )
+        md = _serialize(plan)
+        parsed = parse_plan_from_markdown(md)
+        assert parsed.phases[0].tasks[0].steps[0] == plan.phases[0].tasks[0].steps[0]
+
+
 class TestCompletedSteps:
     def test_checked_boxes_parsed(self):
         plan = _make_plan()

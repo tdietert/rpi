@@ -189,6 +189,8 @@ status: draft
 **Files:** `path/to/file.ext`, `path/to/other.ext`
 **Group:** A
 - [ ] <Specific change to make>
+  - <sub-detail or field value>
+  - <another sub-detail>
 - [ ] <Another specific change>
 
 ##### Task 1.2: <Short descriptive name>
@@ -200,7 +202,9 @@ status: draft
 - [ ] <specific command or check to verify this phase works>
 - [ ] <manual verification step if needed>
 
-**Verification Commands:** `make typecheck`, `cd ide && npx tsc --noEmit`
+**Verification Commands:**
+- `<shell command that exits 0 on success>`
+- `<another shell command>`
 
 ### Phase 2: <Name>
 
@@ -216,7 +220,9 @@ status: draft
 **Verification:**
 - [ ] <verification command>
 
-**Verification Commands:** `make typecheck`, `cd ide && npx tsc --noEmit`
+**Verification Commands:**
+- `<shell command that exits 0 on success>`
+- `<another shell command>`
 
 ## Testing Strategy
 

@@ -213,7 +213,12 @@ def serialize_plan_to_markdown(
             lines.append(f"**Files:** {', '.join(task.files)}")
             lines.append(f"**Group:** {task.group}")
             for step in task.steps:
-                lines.append(f"- [ ] {step}")
+                if "\n" in step:
+                    first, rest = step.split("\n", 1)
+                    lines.append(f"- [ ] {first}")
+                    lines.append(rest)
+                else:
+                    lines.append(f"- [ ] {step}")
             lines.append("")
 
         lines.append("**Verification:**")
@@ -374,10 +379,20 @@ def parse_plan_from_markdown(text: str) -> Plan:
             group_m = re.search(r"\*\*Group:\*\*\s*(.+)", task_content)
             group = group_m.group(1).strip() if group_m else "A"
 
-            steps = [
-                m.group(1).strip()
-                for m in re.finditer(r"-\s*\[.\]\s*(.+)", task_content)
-            ]
+            steps: list[str] = []
+            lines = task_content.split("\n")
+            for li, line in enumerate(lines):
+                cb = re.match(r"-\s*\[.\]\s*(.+)", line)
+                if not cb:
+                    continue
+                step_text = cb.group(1).strip()
+                # Collect indented sub-bullets that follow this checkbox
+                for sub_line in lines[li + 1 :]:
+                    if re.match(r"  +- ", sub_line):
+                        step_text += "\n" + sub_line
+                    else:
+                        break
+                steps.append(step_text)
 
             tasks.append(PlanTask(
                 id=task_id, name=task_name, files=files, group=group, steps=steps,
