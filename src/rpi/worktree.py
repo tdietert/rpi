@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -45,6 +46,10 @@ def create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> str
 
     branch_name = f"{gh_user}/rpi-{slug}" if gh_user else f"rpi/{slug}"
     base_branch = args.worktree_base or "main"
+
+    if args.worktree_clean:
+        _clean_worktree(repo_root, slug, branch_name, disp)
+
     ts = int(time.time())
     worktree_dir = repo_root / ".claude" / "worktrees" / f"{slug}-{ts}"
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +61,30 @@ def create_worktree(args: argparse.Namespace, prompt: str, disp: Display) -> str
         disp.error(f"Failed to create worktree: {result.stderr.strip()}")
         sys.exit(1)
     return str(worktree_dir)
+
+
+def _clean_worktree(repo_root: Path, slug: str, branch_name: str, disp: Display) -> None:
+    """Remove existing worktrees matching *slug* and delete the associated branch."""
+    worktrees_parent = repo_root / ".claude" / "worktrees"
+    if worktrees_parent.is_dir():
+        for entry in worktrees_parent.iterdir():
+            if entry.is_dir() and entry.name.startswith(slug):
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(entry)],
+                    capture_output=True, text=True, cwd=str(repo_root),
+                )
+                if entry.exists():
+                    shutil.rmtree(entry, ignore_errors=True)
+                disp.info(f"Removed worktree: {entry.name}")
+
+    subprocess.run(
+        ["git", "worktree", "prune"],
+        capture_output=True, text=True, cwd=str(repo_root),
+    )
+    subprocess.run(
+        ["git", "branch", "-D", branch_name],
+        capture_output=True, text=True, cwd=str(repo_root),
+    )
 
 
 def _gh_username() -> str:

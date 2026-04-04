@@ -118,6 +118,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--worktree", action="store_true", default=None, help="Run in an isolated git worktree (new branch from main)")
     parser.add_argument("--worktree-name", default=None, help="Custom branch/slug name for the worktree (implies --worktree). E.g. --worktree-name my-feature creates branch rpi/my-feature.")
     parser.add_argument("--worktree-base", default=None, help="Base branch for the new worktree (default: main). E.g. --worktree-base develop")
+    parser.add_argument("--worktree-clean", action="store_true", default=False, help="Remove existing worktree for this slug before creating a fresh one")
     parser.add_argument("--worktree-path", default=None, help="Path to an existing git worktree to reuse (e.g. from a previous run). Skips worktree creation.")
     parser.add_argument("--dry-run", action="store_true", default=None, help="Print commands without executing")
     parser.add_argument("--resume", type=Path, default=None, help="Resume from a snapshot directory (e.g. ~/.claude/snapshots/rpi-my-feature-20260322-143000)")
