@@ -164,6 +164,8 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
         rows.append((StageName.push_pr.label, icon(ok), detail))
 
     footer = {}
+    if config.plan_path:
+        footer["Plan"] = filelink(config.plan_path)
     if config.worktree:
         footer["Worktree"] = filelink(config.worktree)
 

@@ -65,9 +65,10 @@ class PlanReviewStage(Stage):
         )
         self._snapshot(ctx)
 
-        # Copy reviewed plan back to original location if it was external
+        # Copy reviewed plan back to canonical location
         if config.plan_path != work_plan:
             shutil.copy2(work_plan, config.plan_path)
+            ctx.display.info(f"Plan updated at: {filelink(config.plan_path)}")
 
         # Re-parse after review -- review may have modified the plan structure
         ctx.display.info("Re-parsing plan after review modifications...")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from datetime import date
 from pathlib import Path
 
@@ -36,7 +37,7 @@ class PlanStage(Stage):
         if not spec_context and ctx.research_path and ctx.research_path.is_file():
             research_context = f" Use research at {ctx.research_path} for context."
 
-        # Compute plan file path in the work directory
+        # Compute plan filename and paths
         raw = config.prompt
         if not raw and ctx.spec_path:
             raw = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", ctx.spec_path.stem)
@@ -44,7 +45,15 @@ class PlanStage(Stage):
             raw = re.sub(r"^\d{4}-\d{2}-\d{2}-?", "", ctx.research_path.stem)
         kebab = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:60]
         filename = f"{today}-{kebab}.md"
-        abs_path = ctx.work_dir / filename
+
+        # work_path: where agents create/edit (writable temp dir)
+        work_path = ctx.work_dir / filename
+
+        # canon_path: canonical location in .claude/plans/ (presented to user)
+        plans_root = Path(config.worktree) if config.worktree else Path.cwd()
+        plans_dir = plans_root / ".claude" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        canon_path = plans_dir / filename
 
         spec_path_str = str(ctx.spec_path) if ctx.spec_path else ""
         research_path_str = str(ctx.research_path) if ctx.research_path else ""
@@ -56,12 +65,12 @@ class PlanStage(Stage):
                 research_path_str or None,
                 spec_path_str or None,
             )
-            abs_path.write_text(md)
+            work_path.write_text(md)
         else:
             prompt = (
                 f"Run /rpi-plan to create an implementation plan."
                 f"{spec_context}{research_context}"
-                f" Write the plan to `{abs_path}`."
+                f" Write the plan to `{work_path}`."
                 f" Task: {config.prompt}"
             )
 
@@ -75,19 +84,21 @@ class PlanStage(Stage):
                 )
                 act.complete("success", "plan written")
 
-            if not abs_path.is_file():
+            if not work_path.is_file():
                 raise RuntimeError(
-                    f"Agent did not write plan file to {abs_path}. "
+                    f"Agent did not write plan file to {work_path}. "
                     "Check the plan activity log for errors."
                 )
-            plan = parse_plan_from_markdown(abs_path.read_text())
+            plan = parse_plan_from_markdown(work_path.read_text())
 
         ctx.display.info(f"{plan.title} ({len(plan.phases)} phases)")
 
         # Validate with auto-fix
-        plan = self._validate_with_fix(plan, abs_path, ctx)
+        plan = self._validate_with_fix(plan, work_path, ctx)
 
-        ctx.display.info(f"Plan written to: {filelink(abs_path)}")
+        # Copy to canonical location before presenting to user
+        shutil.copy2(work_path, canon_path)
+        ctx.display.info(f"Plan written to: {filelink(canon_path)}")
 
         # Feedback loop
         while True:
@@ -95,8 +106,11 @@ class PlanStage(Stage):
             if feedback is None:
                 break
 
+            # Copy latest canonical plan back to work_dir in case of manual edits
+            shutil.copy2(canon_path, work_path)
+
             update_prompt = (
-                f"Update the plan at `{abs_path}` based on this feedback: {feedback}\n\n"
+                f"Update the plan at `{work_path}` based on this feedback: {feedback}\n\n"
                 f"Read the current plan, re-investigate as needed, then edit the file. "
                 f"Maintain the exact markdown format — the file is parsed deterministically."
             )
@@ -110,13 +124,16 @@ class PlanStage(Stage):
                 )
                 act.complete("success", "plan updated")
 
-            plan = parse_plan_from_markdown(abs_path.read_text())
-            plan = self._validate_with_fix(plan, abs_path, ctx)
-            ctx.display.info(f"Plan updated: {filelink(abs_path)}")
+            plan = parse_plan_from_markdown(work_path.read_text())
+            plan = self._validate_with_fix(plan, work_path, ctx)
 
-        # Set context for downstream stages
+            # Copy updated plan back to canonical location
+            shutil.copy2(work_path, canon_path)
+            ctx.display.info(f"Plan updated: {filelink(canon_path)}")
+
+        # Set context for downstream stages — plan_path is the canonical location
         ctx.plan = plan
-        ctx.config.plan_path = abs_path
+        ctx.config.plan_path = canon_path
         ctx.meta = PlanMetadata(
             title=plan.title,
             num_phases=len(plan.phases),
