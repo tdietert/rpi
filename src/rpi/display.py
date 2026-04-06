@@ -208,28 +208,25 @@ class StreamActivity(Activity):
         self._write_log(text_obj.plain + "\n")
         self._update_live(self._build_panel())
 
-    def _pad_body(self, lines: deque[Text], height: int) -> Text:
-        visible = list(lines)[:height]
-        padding_count = max(0, height - len(visible))
-        if padding_count:
-            visible.extend([Text("")] * padding_count)
-        return Text("\n").join(visible)
-
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
 
         terminal_height = shutil.get_terminal_size().lines
         chrome_lines = 4
-        effective = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
+        max_lines = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
 
-        body = self._pad_body(self._ring_buffer, effective) if self._ring_buffer else Text("waiting...", style="dim")
+        if self._ring_buffer:
+            visible = list(self._ring_buffer)[-max_lines:]
+            body = Text("\n").join(visible)
+        else:
+            body = Text("waiting...", style="dim")
+
         idle = time.monotonic() - self._last_event_time
         idle_suffix = f", idle {idle:.0f}s" if idle > 10 else ""
         inner = Panel(
             body,
             title=f"Agent ({self._event_count} events{idle_suffix})",
-            height=effective + 2,
             border_style="yellow" if idle > 30 else "dim",
         )
         return Panel(
@@ -267,13 +264,6 @@ class QuorumActivity(Activity):
         self._write_log(f"[reviewer {reviewer}] {text_obj.plain}\n")
         self._update_live(self._build_panel())
 
-    def _pad_body(self, lines: list[Text] | deque[Text], height: int) -> Text:
-        visible = list(lines)[:height]
-        padding_count = max(0, height - len(visible))
-        if padding_count:
-            visible.extend([Text("")] * padding_count)
-        return Text("\n").join(visible)
-
     def _build_panel(self) -> Panel:
         elapsed = time.monotonic() - self.start_time
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
@@ -281,19 +271,23 @@ class QuorumActivity(Activity):
         terminal_height = shutil.get_terminal_size().lines
         chrome_lines = 2
         panel_chrome = 2
-        effective = min(
+        max_lines = min(
             self._ring_max,
             max(3, (terminal_height - chrome_lines) // self.reviewer_count - panel_chrome),
         )
 
         panels = []
         for i in range(self.reviewer_count):
-            body = self._pad_body(self._ring_buffers[i], effective)
+            buf = self._ring_buffers[i]
+            if buf:
+                visible = list(buf)[-max_lines:]
+                body = Text("\n").join(visible)
+            else:
+                body = Text("waiting...", style="dim")
             panels.append(
                 Panel(
                     body,
                     title=f"Reviewer {i + 1} ({self._event_counts[i]} events)",
-                    height=effective + 2,
                     border_style="dim",
                 )
             )
@@ -313,7 +307,7 @@ class Display:
         self._stdout = Console()
         self._verbose = verbose
         self._log_dir = log_dir
-        self._width = width or min(72, shutil.get_terminal_size().columns)
+        self._width = width or shutil.get_terminal_size().columns
         self._lock = threading.Lock()
         self._active: Activity | None = None
         self._live: Live | None = None
@@ -374,7 +368,7 @@ class Display:
             padded = f"{label + ':':<12}"
             lines.append(f"{cyan(padded)} {value}")
         body = "\n".join(lines)
-        panel = Panel(body, title=bold(title), border_style="blue", width=min(80, self._width))
+        panel = Panel(body, title=bold(title), border_style="blue", width=self._width)
         self._console.print(panel)
 
     def stage_header(self, text: str) -> None:
@@ -403,7 +397,7 @@ class Display:
             table.add_row("", "")
             for k, v in effective_footer.items():
                 table.add_row(k, v)
-        panel = Panel(table, title=bold(title), border_style="dim", width=min(80, self._width))
+        panel = Panel(table, title=bold(title), border_style="dim", width=self._width)
         self._stdout.print(panel)
 
     @contextmanager
