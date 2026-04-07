@@ -77,6 +77,5 @@ Your output will be constrained to a JSON schema. Report:
 - Do NOT ask for approval. Execute the commits directly.
 - Do NOT use `git add -A` or `git add .` -- always stage specific files.
 - Do NOT commit files that look like secrets (.env, credentials.json, etc.).
-- Do NOT add Co-Authored-By or attribution lines to commit messages.
 - Do NOT use `--no-verify` or skip hooks.
 - If a pre-commit hook fails, fix the issue and create a new commit (do not amend).

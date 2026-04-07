@@ -76,7 +76,6 @@ Your output will be constrained to a JSON schema. Report:
 
 - Do NOT include "Testing strategy", "Test plan", or "How to test" sections.
 - Do NOT include "Generated with Claude Code" or AI attribution footers.
-- Do NOT include Co-Authored-By lines.
 - Do NOT use emoji in the title or description.
 - Do NOT parrot commit messages verbatim -- synthesize and consolidate.
 - Do NOT ask for approval. Create the PR directly.
