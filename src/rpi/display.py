@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import math
 import shutil
 import sys
 import threading
@@ -110,6 +111,26 @@ def _wrap_text(text: str, width: int) -> list[str]:
     if current:
         lines.append(current)
     return lines
+
+
+def _visual_line_count(entry: Text, width: int) -> int:
+    """Estimate how many visual terminal lines a Text entry occupies when rendered."""
+    plain = entry.plain
+    if not plain:
+        return 1
+    return max(1, math.ceil(len(plain) / width))
+
+
+def _trim_to_visual_lines(entries: list[Text], max_visual: int, width: int) -> list[Text]:
+    """Return the tail of *entries* that fits within *max_visual* rendered lines."""
+    total = 0
+    start = len(entries)
+    for i in range(len(entries) - 1, -1, -1):
+        total += _visual_line_count(entries[i], width)
+        if total > max_visual:
+            break
+        start = i
+    return entries[start:]
 
 
 class _SyncFile:
@@ -258,11 +279,13 @@ class StreamActivity(Activity):
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
 
         terminal_height = shutil.get_terminal_size().lines
+        terminal_width = shutil.get_terminal_size().columns
         chrome_lines = 4
-        max_lines = min(self._ring_max, max(3, terminal_height - chrome_lines - 2))
+        max_visual_lines = max(3, terminal_height - chrome_lines - 2)
+        inner_width = max(20, terminal_width - 8)
 
         if self._ring_buffer:
-            visible = list(self._ring_buffer)[-max_lines:]
+            visible = _trim_to_visual_lines(list(self._ring_buffer), max_visual_lines, inner_width)
             body = Text("\n").join(visible)
         else:
             body = Text("waiting...", style="dim")
@@ -314,18 +337,17 @@ class QuorumActivity(Activity):
         spinner = SPINNER_FRAMES[int(elapsed * 2) % len(SPINNER_FRAMES)]
 
         terminal_height = shutil.get_terminal_size().lines
+        terminal_width = shutil.get_terminal_size().columns
         chrome_lines = 2
         panel_chrome = 2
-        max_lines = min(
-            self._ring_max,
-            max(3, (terminal_height - chrome_lines) // self.reviewer_count - panel_chrome),
-        )
+        max_visual_lines = max(3, (terminal_height - chrome_lines) // self.reviewer_count - panel_chrome)
+        inner_width = max(20, terminal_width - 6)
 
         panels = []
         for i in range(self.reviewer_count):
             buf = self._ring_buffers[i]
             if buf:
-                visible = list(buf)[-max_lines:]
+                visible = _trim_to_visual_lines(list(buf), max_visual_lines, inner_width)
                 body = Text("\n").join(visible)
             else:
                 body = Text("waiting...", style="dim")
@@ -411,6 +433,12 @@ class Display:
         if len(text) <= w:
             return text
         return text[: w - 1] + "\u2026"
+
+    def result_panel(self, title: str, lines: list[str], border_style: str = "cyan") -> None:
+        """Print a bordered panel for intermediate results (review verdicts, applied changes, etc.)."""
+        body = "\n".join(lines)
+        panel = Panel(body, title=bold(title), border_style=border_style, width=self._width, padding=(0, 1))
+        self._console.print(panel)
 
     def banner(self, title: str, fields: list[tuple[str, str]]) -> None:
         """Print startup banner as a rich Panel."""

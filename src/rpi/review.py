@@ -31,6 +31,7 @@ from .process import (
 class QuorumResult:
     aggregated: ReviewResult
     per_reviewer: list[ReviewResult]
+    scores_summary: str = ""
 
 
 @dataclass
@@ -128,8 +129,6 @@ def run_review_quorum(
 
     scores_str = " ".join(f"R{i+1}:{r.score}/20" for i, r in enumerate(results))
     med_score = int(median(r.score for r in results))
-    if display is not None:
-        display.info(f"{scores_str} -> median {med_score}/20")
 
     med_correctness = int(median(r.correctness for r in results))
     med_completeness = int(median(r.completeness for r in results))
@@ -152,7 +151,11 @@ def run_review_quorum(
         issues=all_issues,
         suggested_changes=all_changes,
     )
-    return QuorumResult(aggregated=aggregated, per_reviewer=results)
+    return QuorumResult(
+        aggregated=aggregated,
+        per_reviewer=results,
+        scores_summary=f"{scores_str} -> median {med_score}/20",
+    )
 
 
 def _apply_feedback(
@@ -328,19 +331,22 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
 
         score_10 = result.score // 2
         _score_fmt = green if score_10 >= config.min_score else yellow
-        display.info(
+
+        panel_lines: list[str] = []
+        if quorum_result.scores_summary:
+            panel_lines.append(quorum_result.scores_summary)
+        panel_lines.append(
             f"Score: {_score_fmt(f'{score_10}/10')} ({result.score}/20), "
             f"Verdict: {derive_verdict(result)}"
         )
         if result.issues:
             n_critical = sum(1 for i in result.issues if i.severity == "critical")
             n_notes = sum(1 for i in result.issues if i.severity == "note")
-            display.info(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
-            for issue in result.issues[:5]:
+            panel_lines.append(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
+            for issue in result.issues:
                 sev_tag = rich_escape(f"[{issue.severity.upper()}]")
-                display.info(f"  - {sev_tag} {issue.description[:100]}")
-            if len(result.issues) > 5:
-                display.info(f"  ... and {len(result.issues) - 5} more")
+                panel_lines.append(f"  - {sev_tag} {issue.description}")
+        display.result_panel("Review Result", panel_lines)
 
         apply_summary = ""
         if _has_feedback(quorum_result.per_reviewer):
@@ -354,10 +360,9 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
                 display=display,
                 path=config.apply_path,
             )
-            display.info(
-                f"Applied {config.apply_noun}: {apply_result.changes_applied} "
-                f"{config.apply_noun} — {apply_result.summary}"
-            )
+            display.result_panel("Applied Changes", [
+                f"{apply_result.changes_applied} {config.apply_noun} — {apply_result.summary}",
+            ], border_style="green")
             apply_summary = (
                 f"{apply_result.changes_applied} {config.apply_noun}: {apply_result.summary}"
             )
