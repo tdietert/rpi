@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import shutil
+import sys
 import threading
 import time
 from collections import deque
@@ -108,6 +110,49 @@ def _wrap_text(text: str, width: int) -> list[str]:
     if current:
         lines.append(current)
     return lines
+
+
+class _SyncFile:
+    """Wraps a file to add DEC mode 2026 synchronized output framing.
+
+    Tells the terminal to batch all output between BSU (Begin Synchronized
+    Update) and ESU (End Synchronized Update) into a single atomic frame,
+    preventing partial escape-sequence renders from corrupting xterm.js state.
+    Terminals that don't support mode 2026 silently ignore the sequences.
+    """
+
+    _BSU = "\x1b[?2026h"
+    _ESU = "\x1b[?2026l"
+
+    def __init__(self, wrapped: object) -> None:
+        self._wrapped = wrapped
+
+    def write(self, text: str) -> int:
+        if "\x1b" in text:
+            return self._wrapped.write(f"{self._BSU}{text}{self._ESU}")
+        return self._wrapped.write(text)
+
+    def flush(self) -> None:
+        self._wrapped.flush()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+
+def _reset_terminal() -> None:
+    """Best-effort terminal state reset on exit.
+
+    Emits show-cursor and SGR-reset sequences so a crash mid-render doesn't
+    leave the terminal with a hidden cursor or garbled styling.
+    """
+    try:
+        sys.stderr.write("\x1b[?25h\x1b[0m")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+atexit.register(_reset_terminal)
 
 
 class Activity:
@@ -303,11 +348,17 @@ class Display:
     """Centralized terminal output using rich."""
 
     def __init__(self, verbose: bool = False, *, log_dir: Path, width: int | None = None) -> None:
-        self._console = Console(stderr=True)
-        self._stdout = Console()
+        _size = shutil.get_terminal_size()
+        self._width = width or _size.columns
+        self._height = _size.lines
+        # Wrap stderr in _SyncFile for atomic frame updates, and pin
+        # dimensions so Rich never calls get_terminal_size mid-render.
+        self._console = Console(
+            file=_SyncFile(sys.stderr), width=self._width, height=self._height,
+        )
+        self._stdout = Console(file=_SyncFile(sys.stdout), width=self._width)
         self._verbose = verbose
         self._log_dir = log_dir
-        self._width = width or shutil.get_terminal_size().columns
         self._lock = threading.Lock()
         self._active: Activity | None = None
         self._live: Live | None = None

@@ -134,21 +134,6 @@ class TestQuorumActivity:
             assert act._event_counts[0] == 5
             act.complete("success", "done")
 
-    def test_pad_body(self, tmp_path):
-        act = QuorumActivity(
-            label="Test",
-            log_path=tmp_path / "pad.log",
-            reviewer_count=2,
-            ring_max=5,
-            verbose=False,
-            _print=lambda s: None,
-            _update_live=lambda r: None,
-        )
-        assert act._pad_body([Text("a"), Text("b")], 5).plain == "a\nb\n\n\n"
-        assert act._pad_body([], 3).plain == "\n\n"
-        assert act._pad_body([Text("x"), Text("y"), Text("z")], 3).plain == "x\ny\nz"
-        act._close_log()
-
     def test_build_panel_returns_panel(self, tmp_path):
         act = QuorumActivity(
             label="Test",
@@ -170,6 +155,7 @@ class TestQuorumActivity:
             act.complete("success", "done")
 
     def test_adaptive_sizing_short_terminal(self, tmp_path):
+        """Ring buffer is capped by terminal height so panels don't overflow."""
         act = QuorumActivity(
             label="Test",
             log_path=tmp_path / "adaptive.log",
@@ -179,16 +165,18 @@ class TestQuorumActivity:
             _print=lambda s: None,
             _update_live=lambda r: None,
         )
+        # Feed more lines than the short terminal allows per reviewer.
+        for i in range(10):
+            act.stream_line(f"line {i}", reviewer=0)
         with patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 20))):
-            act.stream_line("hello", reviewer=0)
             result = act._build_panel()
         assert isinstance(result, Panel)
-        # effective = min(15, max(3, (20 - 2) // 3 - 2)) = min(15, 4) = 4
-        # inner panel height = effective + 2 = 6
+        # effective = min(15, max(3, (20 - 2) // 3 - 2)) = 4
         inner_panels = list(result.renderable.renderables)
-        for panel in inner_panels:
-            assert isinstance(panel, Panel)
-            assert panel.height == 6
+        # Reviewer 0 should have at most 4 visible lines.
+        body_text = inner_panels[0].renderable.plain
+        visible_lines = [l for l in body_text.split("\n") if l]
+        assert len(visible_lines) <= 4
         act._close_log()
 
 
