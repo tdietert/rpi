@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -89,13 +88,8 @@ class ImplementStage(Stage):
         plan = ctx.plan
         skip_phases = ctx.resume_completed_phases or None
         num_phases = len(plan.phases)
-
-        # Use the work_dir copy of the plan so agents can edit it
-        # (the canonical .claude/plans/ path is not writable by agents).
-        work_plan = work_dir / config.plan_path.name
-        if config.plan_path != work_plan and config.plan_path.is_file():
-            shutil.copy2(config.plan_path, work_plan)
-        path = work_plan if work_plan.is_file() else config.plan_path
+        ctx.ensure_work_copies()
+        path = ctx.work_plan or config.plan_path
 
         ctx.display.stage_header(f"Stage 2: Implementation ({num_phases} phases)")
         if ctx.progress.implementation is None:

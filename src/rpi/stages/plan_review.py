@@ -18,25 +18,13 @@ class PlanReviewStage(Stage):
 
     def run(self, ctx) -> None:
         config = ctx.config
+        ctx.ensure_work_copies()
 
-        # Agents cannot edit files inside .claude/, so ensure the plan
-        # lives in work_dir before handing it to reviewers.
-        work_plan = ctx.work_dir / config.plan_path.name
-        if config.plan_path != work_plan:
-            shutil.copy2(config.plan_path, work_plan)
-            ctx.display.info(f"Plan copied to: {filelink(work_plan)}")
-
-        # Copy spec/research to work_dir so reviewers can find them
-        # without hunting through stale frontmatter paths.
         context_hints = ""
-        if ctx.spec_path and ctx.spec_path.is_file():
-            work_spec = ctx.work_dir / ctx.spec_path.name
-            shutil.copy2(ctx.spec_path, work_spec)
-            context_hints += f" The spec file is at {work_spec}."
-        if ctx.research_path and ctx.research_path.is_file():
-            work_research = ctx.work_dir / ctx.research_path.name
-            shutil.copy2(ctx.research_path, work_research)
-            context_hints += f" The research file is at {work_research}."
+        if ctx.work_spec:
+            context_hints += f" The spec file is at {ctx.work_spec}."
+        if ctx.work_research:
+            context_hints += f" The research file is at {ctx.work_research}."
 
         ctx.display.stage_header(
             f"Stage 1: Plan Review (target >= {config.min_score}/10, "
@@ -45,7 +33,7 @@ class PlanReviewStage(Stage):
 
         loop_config = ReviewLoopConfig(
             loop_type="plan_review",
-            review_prompt=f"Run /rpi-plan-review on the plan file at {work_plan}.{context_hints}",
+            review_prompt=f"Run /rpi-plan-review on the plan file at {ctx.work_plan}.{context_hints}",
             history_noun="changes",
             apply_label="Applying review feedback to plan...",
             apply_noun="changes",
@@ -54,11 +42,11 @@ class PlanReviewStage(Stage):
             max_iters=config.max_review_iters,
             min_score=config.min_score,
             review_quorum=config.review_quorum,
-            plan_path=work_plan,
+            plan_path=ctx.work_plan,
             work_dir=ctx.work_dir,
             dry_run=config.dry_run,
             worktree=config.worktree,
-            apply_path=work_plan,
+            apply_path=ctx.work_plan,
         )
         result = run_review_loop(loop_config, ctx.display)
 
@@ -78,8 +66,8 @@ class PlanReviewStage(Stage):
         self._snapshot(ctx)
 
         # Copy reviewed plan back to canonical location
-        if config.plan_path != work_plan:
-            shutil.copy2(work_plan, config.plan_path)
+        if ctx.work_plan and config.plan_path != ctx.work_plan:
+            shutil.copy2(ctx.work_plan, config.plan_path)
             ctx.display.info(f"Plan updated at: {filelink(config.plan_path)}")
 
         # Re-parse after review -- review may have modified the plan structure

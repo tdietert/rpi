@@ -35,7 +35,7 @@ class ReviewFixStage(Stage):
             max_iters=config.max_fix_iters,
             min_score=config.min_score,
             review_quorum=config.review_quorum,
-            plan_path=config.plan_path,
+            plan_path=ctx.work_plan or config.plan_path,
             work_dir=ctx.work_dir,
             dry_run=config.dry_run,
             worktree=config.worktree,

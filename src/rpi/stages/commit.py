@@ -29,7 +29,7 @@ class CommitStage(Stage):
         with ctx.display.activity("Commit", "commit") as act:
             result = run_claude_structured(
                 prompt=(
-                    f"Run /rpi-commit to commit changes related to the plan at {config.plan_path}. "
+                    f"Run /rpi-commit to commit changes related to the plan at {ctx.work_plan or config.plan_path}. "
                     "Read the plan file first to understand what this plan covers, then only commit "
                     "changes that are relevant to the plan. Leave unrelated changes unstaged."
                 ),

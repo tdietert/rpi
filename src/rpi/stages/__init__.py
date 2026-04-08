@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -37,6 +38,34 @@ class PipelineContext:
     resume_completed_phases: set[int] = field(default_factory=set)
     research_path: Path | None = None
     spec_path: Path | None = None
+    work_plan: Path | None = None
+    work_spec: Path | None = None
+    work_research: Path | None = None
+
+    def ensure_work_copies(self) -> None:
+        """Copy canonical plan/spec/research to work_dir for agent access.
+
+        Agents running in worktrees cannot access files under .claude/ in
+        the main repo.  This copies them to work_dir and sets work_* fields
+        so every downstream stage has a guaranteed-valid path.
+        """
+        if self.config.plan_path and self.config.plan_path.is_file():
+            wp = self.work_dir / self.config.plan_path.name
+            if self.config.plan_path != wp:
+                shutil.copy2(self.config.plan_path, wp)
+            self.work_plan = wp
+
+        if self.spec_path and self.spec_path.is_file():
+            ws = self.work_dir / self.spec_path.name
+            if self.spec_path != ws:
+                shutil.copy2(self.spec_path, ws)
+            self.work_spec = ws
+
+        if self.research_path and self.research_path.is_file():
+            wr = self.work_dir / self.research_path.name
+            if self.research_path != wr:
+                shutil.copy2(self.research_path, wr)
+            self.work_research = wr
 
 
 class Stage(ABC):
