@@ -10,7 +10,6 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 
 from rpi.display import (
     Display,
@@ -175,7 +174,7 @@ class TestQuorumActivity:
         inner_panels = list(result.renderable.renderables)
         # Reviewer 0 should have at most 4 visible lines.
         body_text = inner_panels[0].renderable.plain
-        visible_lines = [l for l in body_text.split("\n") if l]
+        visible_lines = [line for line in body_text.split("\n") if line]
         assert len(visible_lines) <= 4
         act._close_log()
 
