@@ -81,3 +81,4 @@ class PlanReviewStage(Stage):
 
     def execute(self, ctx) -> None:
         self.run(ctx)
+        ctx.mirror_artifacts()

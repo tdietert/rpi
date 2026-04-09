@@ -41,6 +41,47 @@ class PipelineContext:
     work_plan: Path | None = None
     work_spec: Path | None = None
     work_research: Path | None = None
+    _mirror_mtimes: dict[Path, float] = field(default_factory=dict)
+
+    def mirror_to_repo(self, path: Path) -> Path | None:
+        """If *path* lives inside a worktree, copy it to the main-repo equivalent.
+
+        Returns the main-repo destination on success, or ``None`` when no copy
+        was needed (same directory, or path not inside the worktree).
+        """
+        wt = Path(self.config.worktree).resolve()
+        repo = Path.cwd().resolve()
+        if wt == repo:
+            return None
+        try:
+            rel = path.resolve().relative_to(wt)
+        except ValueError:
+            return None
+        dest = repo / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+        return dest
+
+    def mirror_artifacts(self) -> None:
+        """Mirror all known artifacts to the main repo if running in a worktree.
+
+        Uses mtime tracking so each artifact is only copied (and logged) when
+        its content has actually changed since the last mirror.
+        """
+        for label, path in [
+            ("Research", self.research_path),
+            ("Spec", self.spec_path),
+            ("Plan", self.config.plan_path),
+        ]:
+            if not path or not path.is_file():
+                continue
+            mtime = path.stat().st_mtime
+            if self._mirror_mtimes.get(path) == mtime:
+                continue
+            dest = self.mirror_to_repo(path)
+            if dest:
+                self.display.info(f"{label} mirrored to: {filelink(dest)}")
+                self._mirror_mtimes[path] = mtime
 
     def ensure_work_copies(self) -> None:
         """Copy canonical plan/spec/research to work_dir for agent access.
@@ -78,6 +119,7 @@ class Stage(ABC):
     def execute(self, ctx: PipelineContext) -> None:
         ctx.display.stage_header(self.label)
         self.run(ctx)
+        ctx.mirror_artifacts()
         self._snapshot(ctx)
 
     def _snapshot(self, ctx: PipelineContext) -> None:
