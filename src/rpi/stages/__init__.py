@@ -89,21 +89,25 @@ class PipelineContext:
         Agents running in worktrees cannot access files under .claude/ in
         the main repo.  This copies them to work_dir and sets work_* fields
         so every downstream stage has a guaranteed-valid path.
+
+        Filenames are prefixed with their artifact type to avoid collisions
+        when multiple artifacts share the same basename (e.g. spec and plan
+        both named ``2026-04-08-idle-stop.md``).
         """
         if self.config.plan_path and self.config.plan_path.is_file():
-            wp = self.work_dir / self.config.plan_path.name
+            wp = self.work_dir / f"plan-{self.config.plan_path.name}"
             if self.config.plan_path != wp:
                 shutil.copy2(self.config.plan_path, wp)
             self.work_plan = wp
 
         if self.spec_path and self.spec_path.is_file():
-            ws = self.work_dir / self.spec_path.name
+            ws = self.work_dir / f"spec-{self.spec_path.name}"
             if self.spec_path != ws:
                 shutil.copy2(self.spec_path, ws)
             self.work_spec = ws
 
         if self.research_path and self.research_path.is_file():
-            wr = self.work_dir / self.research_path.name
+            wr = self.work_dir / f"research-{self.research_path.name}"
             if self.research_path != wr:
                 shutil.copy2(self.research_path, wr)
             self.work_research = wr
