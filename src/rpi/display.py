@@ -495,7 +495,7 @@ class Display:
         self,
         title: str,
         rows: list[tuple[str, str | Text, str | Text]],
-        footer: dict[str, str] | None = None,
+        footer: dict[str, str | Text] | None = None,
         total_elapsed: float | None = None,
     ) -> None:
         """Render final summary as a rich Table in a Panel."""
@@ -506,14 +506,15 @@ class Display:
             icon_t = icon if isinstance(icon, Text) else Text(icon)
             detail_t = detail if isinstance(detail, Text) else Text(detail)
             table.add_row(Text(label), Text.assemble(icon_t, "  ", detail_t))
-        effective_footer = dict(footer) if footer else {}
+        effective_footer: dict[str, str | Text] = dict(footer) if footer else {}
         if total_elapsed is not None:
             minutes, seconds = divmod(total_elapsed, 60)
             effective_footer["Elapsed"] = f"{int(minutes)}m {seconds:.1f}s"
         if effective_footer:
             table.add_row("", "")
             for k, v in effective_footer.items():
-                table.add_row(Text(k), Text(v))
+                value_t = v if isinstance(v, Text) else Text(v)
+                table.add_row(Text(k), value_t)
         panel = Panel(table, title=bold(title), border_style="dim", width=self._width)
         self._stdout.print(panel)
 

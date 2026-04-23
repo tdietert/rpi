@@ -394,6 +394,22 @@ class TestUntrustedContentSafety:
         )
         assert "[/.*/]" in stdout_buf.getvalue()
 
+    def test_summary_table_accepts_text_in_footer(self, captured_display):
+        """Callers pass filelink() (Text) into footer values; must not crash."""
+        from rpi.display import filelink
+
+        d, _, stdout_buf = captured_display
+        d.summary_table(
+            "Summary",
+            [("Stage", "ok", "done")],
+            footer={"Plan": filelink("/tmp/plan.md"), "Note": "plain string"},
+            total_elapsed=12.3,
+        )
+        out = stdout_buf.getvalue()
+        assert "plan.md" in out
+        assert "plain string" in out
+        assert "Elapsed" in out
+
 
 class TestActivityIntegration:
     def test_full_activity_lifecycle_with_log(self, tmp_path):
