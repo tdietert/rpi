@@ -345,7 +345,7 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
             panel_lines.append(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
             for issue in result.issues:
                 sev_tag = rich_escape(f"[{issue.severity.upper()}]")
-                panel_lines.append(f"  - {sev_tag} {issue.description}")
+                panel_lines.append(f"  - {sev_tag} {rich_escape(issue.description)}")
         display.result_panel("Review Result", panel_lines)
 
         apply_summary = ""
