@@ -104,6 +104,20 @@ _STYLE_FN: dict[str, Callable[[str | Text], Text]] = {
 }
 
 
+def _as_text(value: str | Text) -> Text:
+    """Coerce a ``str | Text`` to a :class:`Text` without ever parsing Rich markup.
+
+    Plain strings become literal Text. Existing Text objects are returned as-is
+    (not copied — safe when the caller immediately hands the result to a render
+    API). This is the **single coercion point** for caller-supplied content in
+    this module: every ``str | Text`` parameter should be normalized via this
+    helper before being passed to Rich. A bare ``Text(value)`` call is a bug
+    when ``value`` might already be a Text — Rich's ``Text.__init__`` expects a
+    ``str`` and raises ``AttributeError`` on a Text input.
+    """
+    return value if isinstance(value, Text) else Text(value)
+
+
 def _indent(msg: str | Text, *, style: str | None = None) -> Text:
     """Prefix a two-space indent. If *style* is given, it applies as the Text's base
     style; explicit inline styling on caller-built :class:`Text` objects is preserved.
@@ -288,7 +302,7 @@ class StreamActivity(Activity):
             raise RuntimeError("Activity already completed")
         self._event_count += 1
         self._last_event_time = time.monotonic()
-        text_obj = text if isinstance(text, Text) else Text(str(text))
+        text_obj = _as_text(text)
         self._ring_buffer.append(text_obj)
         self._write_log(text_obj.plain + "\n")
         self._update_live(self._build_panel())
@@ -346,7 +360,7 @@ class QuorumActivity(Activity):
         if self._completed:
             raise RuntimeError("Activity already completed")
         self._event_counts[reviewer] += 1
-        text_obj = text if isinstance(text, Text) else Text(str(text))
+        text_obj = _as_text(text)
         self._ring_buffers[reviewer].append(text_obj)
         self._write_log(f"[reviewer {reviewer}] {text_obj.plain}\n")
         self._update_live(self._build_panel())
@@ -414,7 +428,7 @@ class Display:
         guarantees untrusted content (agent output, shell stderr, exception messages)
         cannot crash the display with ``MarkupError`` on stray ``[...]`` tokens.
         """
-        renderable = msg if isinstance(msg, Text) else Text(msg)
+        renderable = _as_text(msg)
         with self._lock:
             if self._live is not None:
                 self._live.console.print(renderable)
@@ -469,7 +483,7 @@ class Display:
         Plain-string lines are rendered literally (no markup parsing). Pass :class:`Text`
         for styled lines.
         """
-        text_lines = [line if isinstance(line, Text) else Text(line) for line in lines]
+        text_lines = [_as_text(line) for line in lines]
         body = Text("\n").join(text_lines)
         panel = Panel(
             body, title=bold(title), border_style=border_style, width=self._width, padding=(0, 1)
@@ -503,9 +517,7 @@ class Display:
         table.add_column("Stage", style="cyan", min_width=14)
         table.add_column("Status")
         for label, icon, detail in rows:
-            icon_t = icon if isinstance(icon, Text) else Text(icon)
-            detail_t = detail if isinstance(detail, Text) else Text(detail)
-            table.add_row(Text(label), Text.assemble(icon_t, "  ", detail_t))
+            table.add_row(Text(label), Text.assemble(_as_text(icon), "  ", _as_text(detail)))
         effective_footer: dict[str, str | Text] = dict(footer) if footer else {}
         if total_elapsed is not None:
             minutes, seconds = divmod(total_elapsed, 60)
@@ -513,8 +525,7 @@ class Display:
         if effective_footer:
             table.add_row("", "")
             for k, v in effective_footer.items():
-                value_t = v if isinstance(v, Text) else Text(v)
-                table.add_row(Text(k), value_t)
+                table.add_row(Text(k), _as_text(v))
         panel = Panel(table, title=bold(title), border_style="dim", width=self._width)
         self._stdout.print(panel)
 
