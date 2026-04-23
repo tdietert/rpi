@@ -151,7 +151,7 @@ class PlanStage(Stage):
         for attempt in range(max_attempts):
             errors = validate_plan(plan)
             if not errors:
-                ctx.display.info("[green]Plan structure validated.[/green]")
+                ctx.display.success("Plan structure validated.")
                 return plan
 
             ctx.display.warn("Plan structure validation found issues:")
