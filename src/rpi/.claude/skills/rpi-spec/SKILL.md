@@ -71,7 +71,7 @@ This is the core of the work. Before writing anything, think through:
 
 ### Step 4: Write the Spec
 
-Write the spec to the **output path provided in the prompt**. If no explicit path is given, determine filename: `.claude/specs/YYYY-MM-DD-<description>.md`
+Write the spec to the **output path provided in the prompt**. Do not choose a different path.
 
 Write the spec following the template below.
 
@@ -84,8 +84,6 @@ After writing the file, print the file path so the pipeline can locate it.
 ---
 
 ## Spec Document Structure
-
-The spec output file goes to the path specified in the prompt. If no path is specified, use `.claude/specs/YYYY-MM-DD-<description>.md`.
 
 ### Frontmatter
 

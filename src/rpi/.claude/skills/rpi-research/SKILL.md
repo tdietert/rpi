@@ -68,19 +68,9 @@ After ALL agents complete:
 
 If meaningful gaps exist, spawn a second round of targeted agents to fill them, then synthesize again. Two rounds is usually sufficient -- if you need a third, the question may need to be narrowed.
 
-### 5. Determine output filename
+### 5. Write the research document
 
-Write to the **output path provided in the prompt**. If no explicit path is given, use the format `.claude/research/YYYY-MM-DD-<description>.md`:
-- YYYY-MM-DD is today's date
-- description is a brief kebab-case summary of the topic
-
-Examples:
-- `.claude/research/2025-06-15-authentication-flow.md`
-- `.claude/research/2025-06-15-module-dependency-graph.md`
-
-### 6. Write the research document
-
-Write the file to the path specified in the prompt using the structure below. Not every section is required for every research question -- include sections that are relevant and skip ones that aren't. The Summary, Detailed Findings, and Code References sections are always required.
+Write the file to the **output path provided in the prompt**. Do not choose a different path. Use the structure below -- not every section is required for every research question, but Summary, Detailed Findings, and Code References are always required.
 
 ```markdown
 ---
@@ -139,7 +129,7 @@ Key files:
 - Enough context that a reader in a fresh session can understand the system without re-exploring
 - Distinction between what's certain (you read the code) and what's inferred (you're connecting dots)
 
-### 7. Report completion
+### 6. Report completion
 
 After writing the file, print the file path so the pipeline can locate it.
 

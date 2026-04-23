@@ -89,7 +89,7 @@ Phase 4: Interrupts — interrupt state types, POST /resolve, interaction + conf
 
 ### Step 4: Write the Plan
 
-Determine filename: `.claude/plans/YYYY-MM-DD-<description>.md`
+Write the plan to the **output path provided in the prompt**. Do not choose a different path.
 
 Write the plan following the template below. The markdown is parsed deterministically — follow the template exactly.
 
