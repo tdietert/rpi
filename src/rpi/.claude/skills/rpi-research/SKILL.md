@@ -17,6 +17,7 @@ Your job is to create a technical map of the existing system -- describe what ex
 
 The rpi.py script provides:
 - A **research query** in the prompt describing what area or question to investigate
+- An **output path** where the research file must be written (always write to this exact path)
 - (Optional) A shared workspace directory for writing intermediate resources
 
 ## Steps
@@ -69,7 +70,7 @@ If meaningful gaps exist, spawn a second round of targeted agents to fill them, 
 
 ### 5. Determine output filename
 
-Format: `.claude/research/YYYY-MM-DD-<description>.md`
+Write to the **output path provided in the prompt**. If no explicit path is given, use the format `.claude/research/YYYY-MM-DD-<description>.md`:
 - YYYY-MM-DD is today's date
 - description is a brief kebab-case summary of the topic
 
@@ -79,7 +80,7 @@ Examples:
 
 ### 6. Write the research document
 
-Write the file using the structure below. Not every section is required for every research question -- include sections that are relevant and skip ones that aren't. The Summary, Detailed Findings, and Code References sections are always required.
+Write the file to the path specified in the prompt using the structure below. Not every section is required for every research question -- include sections that are relevant and skip ones that aren't. The Summary, Detailed Findings, and Code References sections are always required.
 
 ```markdown
 ---

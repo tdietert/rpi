@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -28,9 +31,18 @@ class ResearchStage(Stage):
 
     def run(self, ctx) -> None:
         config = ctx.config
+
+        # Compute research file path in the work directory (avoids .claude/ permission prompts)
+        today = date.today().isoformat()
+        raw = config.prompt or "research"
+        kebab = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:60] or "research"
+        filename = f"{today}-{kebab}.md"
+        abs_path = ctx.work_dir / filename
+
         prompt = (
             f"Run /rpi-research to research the following:\n\n"
-            f"{config.prompt}"
+            f"{config.prompt}\n\n"
+            f"Write the research document to `{abs_path}`."
         )
 
         with ctx.display.activity("Research", "research") as act:
@@ -48,8 +60,9 @@ class ResearchStage(Stage):
                 result.title,
             )
 
-        path = Path(result.research_path)
-        ctx.display.info(Text.assemble("Research written to: ", filelink(path)))
+        path = abs_path if abs_path.is_file() else Path(result.research_path)
+        final_path = self._copy_to_research_dir(path, config.worktree)
+        ctx.display.info(Text.assemble("Research written to: ", filelink(final_path)))
 
         # Feedback loop
         while True:
@@ -57,7 +70,7 @@ class ResearchStage(Stage):
             if feedback is None:
                 break
             update_prompt = (
-                f"Run /rpi-research to update the research at {path}.\n\n"
+                f"Run /rpi-research to update the research at `{abs_path}`.\n\n"
                 f"## Feedback\n\n{feedback}\n\n"
                 "Read the existing research file, then update it based on the "
                 "feedback above. Re-investigate as needed."
@@ -76,9 +89,21 @@ class ResearchStage(Stage):
                     "success" if result.status == "success" else "failed",
                     result.title,
                 )
-            path = Path(result.research_path)
-            ctx.display.info(Text.assemble("Research updated: ", filelink(path)))
+            path = abs_path if abs_path.is_file() else Path(result.research_path)
+            final_path = self._copy_to_research_dir(path, config.worktree)
+            ctx.display.info(Text.assemble("Research updated: ", filelink(final_path)))
 
-        ctx.research_path = path
-        ctx.config.research_path = path
+        ctx.research_path = final_path
+        ctx.config.research_path = final_path
         ctx.progress.research_done = True
+
+    def _copy_to_research_dir(self, src: Path, worktree: str) -> Path:
+        """Copy research from work_dir to .claude/research/ for persistence."""
+        if worktree:
+            research_dir = Path(worktree) / ".claude" / "research"
+        else:
+            research_dir = Path.cwd() / ".claude" / "research"
+        research_dir.mkdir(parents=True, exist_ok=True)
+        dest = research_dir / src.name
+        shutil.copy2(str(src), str(dest))
+        return dest
