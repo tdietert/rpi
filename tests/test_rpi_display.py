@@ -331,6 +331,70 @@ class TestTruncate:
         assert display.truncate("", max_width=50) == ""
 
 
+class TestUntrustedContentSafety:
+    """Untrusted strings passed to Display sinks must never be parsed as Rich markup.
+
+    Regression coverage for MarkupError crashes — e.g. agent-generated text containing
+    code snippets like ``noExternal: [/.*/]`` previously crashed the review result panel
+    because Rich parsed the brackets as malformed closing tags. The fix moved all sinks
+    onto :class:`rich.text.Text`, which treats strings as literals.
+    """
+
+    HOSTILE = "noExternal: [/.*/] and unclosed [green tag and [link=http://evil"
+
+    def test_info_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.info(self.HOSTILE)  # must not raise
+        assert self.HOSTILE in stderr_buf.getvalue()
+
+    def test_success_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.success(self.HOSTILE)
+        assert self.HOSTILE in stderr_buf.getvalue()
+
+    def test_warn_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.warn(self.HOSTILE)
+        assert self.HOSTILE in stderr_buf.getvalue()
+
+    def test_error_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.error(self.HOSTILE)
+        assert self.HOSTILE in stderr_buf.getvalue()
+
+    def test_detail_does_not_parse_markup(self, tmp_path):
+        d = Display(verbose=True, log_dir=tmp_path / "logs")
+        stderr_buf = StringIO()
+        d._console = Console(file=stderr_buf, width=80)
+        d.detail(self.HOSTILE)
+        assert self.HOSTILE in stderr_buf.getvalue()
+
+    def test_result_panel_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.result_panel("Title with [brackets]", [self.HOSTILE, "another [/.*/] line"])
+        out = stderr_buf.getvalue()
+        assert "noExternal: [/.*/]" in out
+        assert "another [/.*/] line" in out
+
+    def test_banner_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.banner("Run [config]", [("field", self.HOSTILE)])
+        assert "[/.*/]" in stderr_buf.getvalue()
+
+    def test_stage_header_does_not_parse_markup(self, captured_display):
+        d, stderr_buf, _ = captured_display
+        d.stage_header(self.HOSTILE)
+        assert "[/.*/]" in stderr_buf.getvalue()
+
+    def test_summary_table_does_not_parse_markup(self, captured_display):
+        d, _, stdout_buf = captured_display
+        d.summary_table(
+            "Summary",
+            [("Stage", "ok", self.HOSTILE)],
+        )
+        assert "[/.*/]" in stdout_buf.getvalue()
+
+
 class TestActivityIntegration:
     def test_full_activity_lifecycle_with_log(self, tmp_path):
         d = Display(verbose=False, log_dir=tmp_path / "logs")

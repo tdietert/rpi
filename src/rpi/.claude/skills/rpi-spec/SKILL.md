@@ -36,6 +36,7 @@ If you find yourself writing "Phase 1 should..." or "Test this by...", you have 
 The rpi.py script provides:
 - A **task description** describing what to design
 - A **research file path** (if available) with codebase context
+- An **output path** where the spec file must be written (always write to this exact path)
 - (Optional) A shared workspace directory for intermediate resources
 
 ## Process
@@ -70,7 +71,7 @@ This is the core of the work. Before writing anything, think through:
 
 ### Step 4: Write the Spec
 
-Determine filename: `.claude/specs/YYYY-MM-DD-<description>.md`
+Write the spec to the **output path provided in the prompt**. If no explicit path is given, determine filename: `.claude/specs/YYYY-MM-DD-<description>.md`
 
 Write the spec following the template below.
 
@@ -84,7 +85,7 @@ After writing the file, print the file path so the pipeline can locate it.
 
 ## Spec Document Structure
 
-The spec output file goes to `.claude/specs/YYYY-MM-DD-<description>.md`.
+The spec output file goes to the path specified in the prompt. If no path is specified, use `.claude/specs/YYYY-MM-DD-<description>.md`.
 
 ### Frontmatter
 

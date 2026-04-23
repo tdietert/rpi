@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
+
 from ..config import Config
 from ..display import Display, dim, filelink, green, red
 from ..plan import Plan, PlanMetadata
@@ -80,7 +82,7 @@ class PipelineContext:
                 continue
             dest = self.mirror_to_repo(path)
             if dest:
-                self.display.info(f"{label} mirrored to: {filelink(dest)}")
+                self.display.info(Text.assemble(label, " mirrored to: ", filelink(dest)))
                 self._mirror_mtimes[path] = mtime
 
     def ensure_work_copies(self) -> None:
@@ -179,13 +181,13 @@ def print_summary(ctx: PipelineContext, *, total_elapsed: float | None = None) -
     config = ctx.config
     meta = ctx.meta
 
-    def icon(ok: bool) -> str:
+    def icon(ok: bool) -> Text:
         return green("ok") if ok else red("--")
 
-    def skip_label() -> str:
+    def skip_label() -> Text:
         return dim("skipped")
 
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str | Text, str | Text]] = []
 
     for sn in (StageName.research, StageName.spec, StageName.plan):
         if skips_stage(config, sn):

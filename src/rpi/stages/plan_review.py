@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import shutil
 
+from rich.text import Text
+
 from ..display import filelink, green
 from ..plan import run_plan_processing
 from ..progress import SnapshotReviewProgress
@@ -54,8 +56,10 @@ class PlanReviewStage(Stage):
         ctx.review_iters = result.iterations
 
         ctx.display.info(
-            f"{green('Stage 1 complete:')} score {ctx.review_score}/10 "
-            f"after {ctx.review_iters} iteration(s)"
+            Text.assemble(
+                green("Stage 1 complete:"),
+                f" score {ctx.review_score}/10 after {ctx.review_iters} iteration(s)",
+            )
         )
 
         ctx.progress.plan_review_done = True
@@ -68,7 +72,7 @@ class PlanReviewStage(Stage):
         # Copy reviewed plan back to canonical location
         if ctx.work_plan and config.plan_path != ctx.work_plan:
             shutil.copy2(ctx.work_plan, config.plan_path)
-            ctx.display.info(f"Plan updated at: {filelink(config.plan_path)}")
+            ctx.display.info(Text.assemble("Plan updated at: ", filelink(config.plan_path)))
 
         # Re-parse after review -- review may have modified the plan structure
         ctx.display.info("Re-parsing plan after review modifications...")

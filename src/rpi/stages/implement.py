@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rich.text import Text
 
 from ..diagnosis import (
     TriageFixRecord,
@@ -254,13 +255,19 @@ class ImplementStage(Stage):
                 else:
                     ctx.display.info(green("Verification: passed"))
 
-            ctx.display.info(f"{green(f'Phase {phase_num}/{num_phases} complete:')} {result.summary}")
+            ctx.display.info(
+                Text.assemble(
+                    green(f"Phase {phase_num}/{num_phases} complete:"), " ", result.summary
+                )
+            )
             ctx.progress.implementation.completed_phases.append(phase_num)
             self._snapshot(ctx)
 
         ctx.display.info(green(f"All {num_phases} phases implemented."))
         ctx.display.info(
-            f"{green('Stage 2 complete:')} all {num_phases} phases implemented"
+            Text.assemble(
+                green("Stage 2 complete:"), f" all {num_phases} phases implemented"
+            )
         )
         ctx.progress.implementation_done = True
 

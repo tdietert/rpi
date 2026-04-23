@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rich.text import Text
 
 from ..display import green
 from ..process import run_claude_structured
@@ -45,6 +46,6 @@ class CommitStage(Stage):
                 f"{result.num_commits} commits — {result.summary}",
             )
 
-        ctx.display.info(f"{green('Stage 4 complete:')} {result.status}")
+        ctx.display.info(Text.assemble(green("Stage 4 complete:"), " ", result.status))
         ctx.commit_result = result
         ctx.progress.commit_done = True

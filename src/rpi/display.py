@@ -45,54 +45,73 @@ STATUS_STYLES: dict[DisplayStatus, str] = {
     "warning": "yellow",
 }
 
-def green(text: str) -> str:
-    """Wrap text in green Rich markup, auto-escaping special characters."""
-    return f"[green]{rich_escape(str(text))}[/green]"
+def _styled(text: str | Text, style: str) -> Text:
+    """Return a Text carrying *style*. Plain strings are treated as literal — never parsed as markup."""
+    if isinstance(text, Text):
+        result = text.copy()
+        result.stylize(style)
+        return result
+    return Text(str(text), style=style)
 
 
-def red(text: str) -> str:
-    """Wrap text in red Rich markup, auto-escaping special characters."""
-    return f"[red]{rich_escape(str(text))}[/red]"
+def green(text: str | Text) -> Text:
+    """Style text green. Safe for untrusted input — never parses markup."""
+    return _styled(text, "green")
 
 
-def dim(text: str) -> str:
-    """Wrap text in dim Rich markup, auto-escaping special characters."""
-    return f"[dim]{rich_escape(str(text))}[/dim]"
+def red(text: str | Text) -> Text:
+    """Style text red. Safe for untrusted input — never parses markup."""
+    return _styled(text, "red")
 
 
-def bold(text: str) -> str:
-    """Wrap text in bold Rich markup, auto-escaping special characters."""
-    return f"[bold]{rich_escape(str(text))}[/bold]"
+def dim(text: str | Text) -> Text:
+    """Style text dim. Safe for untrusted input — never parses markup."""
+    return _styled(text, "dim")
 
 
-def yellow(text: str) -> str:
-    """Wrap text in yellow Rich markup, auto-escaping special characters."""
-    return f"[yellow]{rich_escape(str(text))}[/yellow]"
+def bold(text: str | Text) -> Text:
+    """Style text bold. Safe for untrusted input — never parses markup."""
+    return _styled(text, "bold")
 
 
-def cyan(text: str) -> str:
-    """Wrap text in cyan Rich markup, auto-escaping special characters."""
-    return f"[cyan]{rich_escape(str(text))}[/cyan]"
+def yellow(text: str | Text) -> Text:
+    """Style text yellow. Safe for untrusted input — never parses markup."""
+    return _styled(text, "yellow")
 
 
-def italic(text: str) -> str:
-    """Wrap text in italic Rich markup, auto-escaping special characters."""
-    return f"[italic]{rich_escape(str(text))}[/italic]"
+def cyan(text: str | Text) -> Text:
+    """Style text cyan. Safe for untrusted input — never parses markup."""
+    return _styled(text, "cyan")
 
 
-def filelink(path: str | Path) -> str:
-    """Wrap a file path in a clickable file:// hyperlink (OSC 8)."""
+def italic(text: str | Text) -> Text:
+    """Style text italic. Safe for untrusted input — never parses markup."""
+    return _styled(text, "italic")
+
+
+def filelink(path: str | Path) -> Text:
+    """Wrap a file path in a clickable file:// hyperlink (OSC 8). Safe for untrusted paths."""
     s = str(path)
-    return f"[link=file://{s}]{rich_escape(s)}[/link]"
+    return Text(s, style=f"link file://{s}")
 
 
-_STYLE_FN: dict[str, Callable[[str], str]] = {
+_STYLE_FN: dict[str, Callable[[str | Text], Text]] = {
     "green": green,
     "red": red,
-    "blue": lambda t: f"[blue]{rich_escape(str(t))}[/blue]",
+    "blue": lambda t: _styled(t, "blue"),
     "dim": dim,
     "yellow": yellow,
 }
+
+
+def _indent(msg: str | Text, *, style: str | None = None) -> Text:
+    """Prefix a two-space indent. If *style* is given, it applies as the Text's base
+    style; explicit inline styling on caller-built :class:`Text` objects is preserved.
+    Plain strings are treated as literal — markup is never parsed.
+    """
+    if isinstance(msg, Text):
+        return Text("  ") + msg
+    return Text(f"  {msg}", style=style or "")
 
 
 def _wrap_text(text: str, width: int) -> list[str]:
@@ -196,7 +215,7 @@ class Activity:
         self._log_file = self._log_path.open("w")
         self.start_time = time.monotonic()
         self._completed = False
-        self._completion_line: str | None = None
+        self._completion_line: Text | None = None
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
 
@@ -232,8 +251,8 @@ class Activity:
         icon = STATUS_ICONS.get(status, "?")
         style = STATUS_STYLES.get(status, "")
         _style = _STYLE_FN[style]
-        self._completion_line = (
-            f"{_style(icon)} {self.label} {_style(summary)} {dim(f'({elapsed:.1f}s)')}"
+        self._completion_line = Text.assemble(
+            _style(icon), " ", self.label, " ", _style(summary), " ", dim(f"({elapsed:.1f}s)")
         )
         self._write_log(f"\n--- {status}: {summary} ({elapsed:.1f}s) ---\n")
         self._log_file.flush()
@@ -299,7 +318,7 @@ class StreamActivity(Activity):
         )
         return Panel(
             inner,
-            title=f"{spinner} {bold(self.label)} {dim(f'({elapsed:.1f}s)')}",
+            title=Text.assemble(spinner, " ", bold(self.label), " ", dim(f"({elapsed:.1f}s)")),
             border_style="blue",
         )
 
@@ -361,7 +380,7 @@ class QuorumActivity(Activity):
 
         return Panel(
             Group(*panels),
-            title=f"{spinner} {bold(self.label)} {dim(f'({elapsed:.1f}s)')}",
+            title=Text.assemble(spinner, " ", bold(self.label), " ", dim(f"({elapsed:.1f}s)")),
             border_style="blue",
         )
 
@@ -387,12 +406,20 @@ class Display:
         log_dir.mkdir(parents=True, exist_ok=True)
 
 
-    def _print(self, msg: str) -> None:
+    def _print(self, msg: str | Text) -> None:
+        """Print a line. Strings are treated as literal text — never parsed as Rich markup.
+
+        Callers who want styling must pass a pre-built :class:`rich.text.Text` (e.g. via
+        :func:`Text.assemble` or the :func:`green` / :func:`red` / etc. helpers). This
+        guarantees untrusted content (agent output, shell stderr, exception messages)
+        cannot crash the display with ``MarkupError`` on stray ``[...]`` tokens.
+        """
+        renderable = msg if isinstance(msg, Text) else Text(msg)
         with self._lock:
             if self._live is not None:
-                self._live.console.print(msg)
+                self._live.console.print(renderable)
             else:
-                self._console.print(msg)
+                self._console.print(renderable)
 
     def _update_live(self, renderable: RenderableType) -> None:
         with self._lock:
@@ -411,21 +438,21 @@ class Display:
         if live is not None:
             live.stop()
 
-    def info(self, msg: str) -> None:
-        self._print(f"  {msg}")
+    def info(self, msg: str | Text) -> None:
+        self._print(_indent(msg))
 
-    def success(self, msg: str) -> None:
-        self._print(f"  [green]{msg}[/green]")
+    def success(self, msg: str | Text) -> None:
+        self._print(_indent(msg, style="green"))
 
-    def warn(self, msg: str) -> None:
-        self._print(f"  [yellow]{msg}[/yellow]")
+    def warn(self, msg: str | Text) -> None:
+        self._print(_indent(msg, style="yellow"))
 
-    def error(self, msg: str) -> None:
-        self._print(f"  [red]{msg}[/red]")
+    def error(self, msg: str | Text) -> None:
+        self._print(_indent(msg, style="red"))
 
-    def detail(self, msg: str) -> None:
+    def detail(self, msg: str | Text) -> None:
         if self._verbose:
-            self._print(f"  [dim]{msg}[/dim]")
+            self._print(_indent(msg, style="dim"))
 
     def truncate(self, text: str, max_width: int | None = None) -> str:
         """Truncate text with ellipsis at terminal width."""
@@ -434,19 +461,28 @@ class Display:
             return text
         return text[: w - 1] + "\u2026"
 
-    def result_panel(self, title: str, lines: list[str], border_style: str = "cyan") -> None:
-        """Print a bordered panel for intermediate results (review verdicts, applied changes, etc.)."""
-        body = "\n".join(lines)
-        panel = Panel(body, title=bold(title), border_style=border_style, width=self._width, padding=(0, 1))
+    def result_panel(
+        self, title: str, lines: list[str | Text], border_style: str = "cyan"
+    ) -> None:
+        """Print a bordered panel for intermediate results (review verdicts, applied changes, etc.).
+
+        Plain-string lines are rendered literally (no markup parsing). Pass :class:`Text`
+        for styled lines.
+        """
+        text_lines = [line if isinstance(line, Text) else Text(line) for line in lines]
+        body = Text("\n").join(text_lines)
+        panel = Panel(
+            body, title=bold(title), border_style=border_style, width=self._width, padding=(0, 1)
+        )
         self._console.print(panel)
 
     def banner(self, title: str, fields: list[tuple[str, str]]) -> None:
         """Print startup banner as a rich Panel."""
-        lines: list[str] = []
+        text_lines: list[Text] = []
         for label, value in fields:
             padded = f"{label + ':':<12}"
-            lines.append(f"{cyan(padded)} {value}")
-        body = "\n".join(lines)
+            text_lines.append(Text.assemble(cyan(padded), " ", value))
+        body = Text("\n").join(text_lines)
         panel = Panel(body, title=bold(title), border_style="blue", width=self._width)
         self._console.print(panel)
 
@@ -458,7 +494,7 @@ class Display:
     def summary_table(
         self,
         title: str,
-        rows: list[tuple[str, str, str]],
+        rows: list[tuple[str, str | Text, str | Text]],
         footer: dict[str, str] | None = None,
         total_elapsed: float | None = None,
     ) -> None:
@@ -467,7 +503,9 @@ class Display:
         table.add_column("Stage", style="cyan", min_width=14)
         table.add_column("Status")
         for label, icon, detail in rows:
-            table.add_row(label, f"{icon}  {detail}")
+            icon_t = icon if isinstance(icon, Text) else Text(icon)
+            detail_t = detail if isinstance(detail, Text) else Text(detail)
+            table.add_row(Text(label), Text.assemble(icon_t, "  ", detail_t))
         effective_footer = dict(footer) if footer else {}
         if total_elapsed is not None:
             minutes, seconds = divmod(total_elapsed, 60)
@@ -475,7 +513,7 @@ class Display:
         if effective_footer:
             table.add_row("", "")
             for k, v in effective_footer.items():
-                table.add_row(k, v)
+                table.add_row(Text(k), Text(v))
         panel = Panel(table, title=bold(title), border_style="dim", width=self._width)
         self._stdout.print(panel)
 
@@ -558,7 +596,7 @@ class Display:
             termios.tcsetattr(fd, termios.TCSANOW, attrs)
         except (termios.error, OSError, ValueError):
             pass
-        self._console.print(f"  {prompt} {dim('(y/n)')} ", end="")
+        self._console.print(Text.assemble("  ", prompt, " ", dim("(y/n)"), " "), end="")
         answer = input().strip().lower()
         return answer in ("y", "yes")
 
@@ -572,7 +610,19 @@ class Display:
         from prompt_toolkit import prompt as pt_prompt
 
         action = "provide input" if is_initial_input else "provide feedback"
-        self._console.print(f"\n  {bold(stage_name + ':')} {action} (press {dim('Esc+Enter')} to submit, {dim('Ctrl-D')} to skip)")
+        self._console.print(
+            Text.assemble(
+                "\n  ",
+                bold(stage_name + ":"),
+                " ",
+                action,
+                " (press ",
+                dim("Esc+Enter"),
+                " to submit, ",
+                dim("Ctrl-D"),
+                " to skip)",
+            )
+        )
         try:
             text = pt_prompt("  > ", multiline=True)
         except EOFError:

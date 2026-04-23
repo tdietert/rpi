@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-from rich.markup import escape as rich_escape
+from rich.text import Text
 
 from .display import Display, dim, green, yellow
 from .iteration import (
@@ -344,8 +344,8 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
             n_notes = sum(1 for i in result.issues if i.severity == "note")
             panel_lines.append(f"Issues: {len(result.issues)} ({n_critical} critical, {n_notes} notes)")
             for issue in result.issues:
-                sev_tag = rich_escape(f"[{issue.severity.upper()}]")
-                panel_lines.append(f"  - {sev_tag} {rich_escape(issue.description)}")
+                sev_tag = f"[{issue.severity.upper()}]"
+                panel_lines.append(f"  - {sev_tag} {issue.description}")
         display.result_panel("Review Result", panel_lines)
 
         apply_summary = ""
@@ -377,7 +377,10 @@ def run_review_loop(config: ReviewLoopConfig, display: Display) -> ReviewLoopRes
 
         if score_10 >= config.min_score and derive_verdict(result) == "Ready":
             display.info(
-                f"{green(config.pass_message)} {score_10}/10 after {iteration} iteration(s)."
+                Text.assemble(
+                    green(config.pass_message),
+                    f" {score_10}/10 after {iteration} iteration(s).",
+                )
             )
             return ReviewLoopResult(score=score_10, iterations=iteration, converged=True)
 

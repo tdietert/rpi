@@ -7,11 +7,13 @@ allowed-tools: Task, Read, Glob, Grep, Bash, Write, Edit, AskUserQuestion
 
 # Create RPI-Compatible Implementation Plan
 
-You are tasked with creating a detailed implementation plan through an interactive process. The plan will be consumed by the **rpi.py automated pipeline** (plan-review-implement-fix). After you write the plan markdown, it is parsed deterministically into a structured representation, then validation runs on the result.
+You are running inside a **non-interactive automated pipeline**. You cannot ask the user questions or solicit feedback at any point during this process. The user will review your complete plan after you write it. If something is uncertain or requires human judgment, leave it as an open question in the plan's "Open Questions" section for the user to address during review. Double-check your work and re-read files when necessary, but do not attempt to interact with the user.
+
+Your task is to create a detailed implementation plan. The plan will be consumed by the **rpi.py automated pipeline** (plan-review-implement-fix). After you write the plan markdown, it is parsed deterministically into a structured representation, then validation runs on the result.
 
 ## How This Differs from /plan
 
-Same interactive investigation process as `/plan`, but the output markdown must be structured for deterministic parsing. After parsing, `validate_plan()` runs deterministic checks (sequential phase numbering, unique task IDs, no cross-group file overlap). Failures block the pipeline.
+The output markdown must be structured for deterministic parsing. After parsing, `validate_plan()` runs deterministic checks (sequential phase numbering, unique task IDs, no cross-group file overlap). Failures block the pipeline.
 
 ---
 
@@ -25,18 +27,10 @@ When invoked, check if arguments were provided:
 
 **If arguments include a task description but no file path**:
 - Check `.claude/specs/` for recent spec files first, then `.claude/research/` for research files
-- If found, ask the user if they want to use any of them
+- Use any relevant files as context
 - Begin the planning process
 
-**If no arguments**:
-```
-I'll help create an rpi-compatible implementation plan. Please provide:
-
-1. What you want to build or change
-2. A spec or research file to reference (check .claude/specs/ and .claude/research/ for recent ones)
-
-Example: /rpi-plan Add rate limiting to the API -- .claude/specs/2025-06-15-rate-limiting.md
-```
+**If no arguments**: Use CLAUDE.md and the task description provided in the prompt to begin planning.
 
 ## Process
 
@@ -67,28 +61,7 @@ If a research file was provided, make the agents' prompts MORE targeted using th
 
 **If a spec was provided, investigation should be lighter.** The spec already covers architecture and interfaces. Focus investigation on: which specific files need to change, what existing test patterns to follow, and any implementation details the spec doesn't cover (it shouldn't -- specs are about architecture, not file-level changes).
 
-### Step 3: Present Understanding and Ask Questions
-
-After agents complete, present what you found and ask targeted questions:
-
-```
-Based on the research and my investigation, here's what I understand:
-
-**Current state:**
-- [Key finding with file:line reference]
-- [Relevant pattern or constraint]
-
-**Proposed approach:**
-- [High-level description of what needs to change]
-
-**Questions before I write the plan:**
-- [Technical question requiring human judgment]
-- [Design choice between approaches]
-```
-
-Only ask questions you genuinely cannot answer from the code. If everything is clear, say so and present the approach for approval.
-
-### Step 4: Decompose into Vertical Slices
+### Step 3: Decompose into Vertical Slices
 
 **Prefer vertical slices over horizontal layers.** Each phase should deliver a thin end-to-end slice of functionality — types, logic, wiring, and tests for one coherent capability — rather than building out one architectural layer at a time.
 
@@ -114,36 +87,17 @@ Phase 4: Interrupts — interrupt state types, POST /resolve, interaction + conf
 
 **When horizontal is acceptable:** When a type change cascades atomically through every layer and there is no meaningful intermediate slice (e.g., replacing five callbacks with a single EventSink interface that threads through the whole call chain). If the cascade can't be split without throwaway adapter code, one phase is fine. But this is the exception — default to vertical.
 
-After determining slices, present the structure before writing details:
-
-```
-Here's my proposed plan structure:
-
-## Phases:
-1. [Phase name] - [end-to-end capability it delivers]
-2. [Phase name] - [end-to-end capability it delivers]
-3. [Phase name] - [end-to-end capability it delivers]
-
-Each phase delivers a complete vertical slice with its own verification.
-Does this phasing make sense?
-```
-
-Get feedback on structure before proceeding.
-
-### Step 5: Write the Plan
+### Step 4: Write the Plan
 
 Determine filename: `.claude/plans/YYYY-MM-DD-<description>.md`
 
 Write the plan following the template below. The markdown is parsed deterministically — follow the template exactly.
 
-### Step 6: Present the Plan
+### Step 5: Finalize
 
 After writing:
 - Print the file path
 - Summarize the plan (phases, key decisions, estimated scope)
-- Ask if anything needs adjustment
-
-If the user requests changes, update the plan file using Edit and re-present.
 
 ---
 

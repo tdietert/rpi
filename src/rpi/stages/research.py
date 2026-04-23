@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rich.text import Text
 
 from ..display import filelink
 from ..process import run_claude_structured
@@ -48,7 +49,7 @@ class ResearchStage(Stage):
             )
 
         path = Path(result.research_path)
-        ctx.display.info(f"Research written to: {filelink(path)}")
+        ctx.display.info(Text.assemble("Research written to: ", filelink(path)))
 
         # Feedback loop
         while True:
@@ -76,7 +77,7 @@ class ResearchStage(Stage):
                     result.title,
                 )
             path = Path(result.research_path)
-            ctx.display.info(f"Research updated: {filelink(path)}")
+            ctx.display.info(Text.assemble("Research updated: ", filelink(path)))
 
         ctx.research_path = path
         ctx.config.research_path = path

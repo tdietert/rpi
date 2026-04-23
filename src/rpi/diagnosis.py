@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rich.text import Text
 
 from .display import Display, filelink
 from .iteration import IterationRecord, format_iteration_history
@@ -194,7 +195,7 @@ def print_diagnosis(diagnosis: DiagnosisResult | None, loop_type: str, display: 
         display.info(f"Convergence Diagnosis: {diagnosis.pattern} — {diagnosis.summary}")
     path = _write_diagnosis_file(diagnosis, loop_type)
     if display is not None:
-        display.info(f"Diagnosis written to: {filelink(path)}")
+        display.info(Text.assemble("Diagnosis written to: ", filelink(path)))
 
 
 def triage_verification_failure(
@@ -441,4 +442,4 @@ def print_implementation_diagnosis(
         display.info(f"Phase {phase_num} Verification Diagnosis: {diagnosis.root_cause}")
     path = _write_implementation_diagnosis_file(diagnosis, phase_num)
     if display is not None:
-        display.info(f"Diagnosis written to: {filelink(path)}")
+        display.info(Text.assemble("Diagnosis written to: ", filelink(path)))

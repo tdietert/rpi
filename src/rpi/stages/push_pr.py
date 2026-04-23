@@ -6,6 +6,7 @@ import subprocess
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rich.text import Text
 
 from ..display import Display, dim, green
 from ..process import run_claude_structured
@@ -65,7 +66,10 @@ class PushPrStage(Stage):
                 ctx.display.stage_header("Stage 5: Push")
                 ctx.push_ok = _run_push(ctx.display, config.dry_run, config.worktree)
                 ctx.display.info(
-                    f"{green('Stage 5 complete:')} {'success' if ctx.push_ok else 'failed'}"
+                    Text.assemble(
+                        green("Stage 5 complete:"),
+                        f" {'success' if ctx.push_ok else 'failed'}",
+                    )
                 )
                 ctx.progress.push_or_pr_done = True
                 self._snapshot(ctx)
@@ -89,7 +93,7 @@ class PushPrStage(Stage):
                     "success" if pr_result.status == "success" else "failed",
                     pr_result.pr_url or pr_result.status,
                 )
-            ctx.display.info(f"{green('Stage 5 complete:')} {pr_result.status}")
+            ctx.display.info(Text.assemble(green("Stage 5 complete:"), " ", pr_result.status))
             ctx.pr_result = pr_result
             ctx.progress.push_or_pr_done = True
             self._snapshot(ctx)

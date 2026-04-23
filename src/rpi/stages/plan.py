@@ -7,6 +7,8 @@ import shutil
 from datetime import date
 from pathlib import Path
 
+from rich.text import Text
+
 from ..display import filelink
 from ..plan import (
     Plan,
@@ -77,7 +79,7 @@ class PlanStage(Stage):
             with ctx.display.activity("Plan", "plan") as act:
                 run_claude_streaming(
                     prompt=prompt,
-                    effort="high",
+                    effort="medium",
                     worktree=config.worktree,
                     work_dir=ctx.work_dir,
                     activity=act,
@@ -98,7 +100,7 @@ class PlanStage(Stage):
 
         # Copy to canonical location before presenting to user
         shutil.copy2(work_path, canon_path)
-        ctx.display.info(f"Plan written to: {filelink(canon_path)}")
+        ctx.display.info(Text.assemble("Plan written to: ", filelink(canon_path)))
 
         # Feedback loop
         while True:
@@ -117,7 +119,7 @@ class PlanStage(Stage):
             with ctx.display.activity("Plan (update)", "plan-update") as act:
                 run_claude_streaming(
                     prompt=update_prompt,
-                    effort="high",
+                    effort="medium",
                     worktree=config.worktree,
                     work_dir=ctx.work_dir,
                     activity=act,
@@ -129,7 +131,7 @@ class PlanStage(Stage):
 
             # Copy updated plan back to canonical location
             shutil.copy2(work_path, canon_path)
-            ctx.display.info(f"Plan updated: {filelink(canon_path)}")
+            ctx.display.info(Text.assemble("Plan updated: ", filelink(canon_path)))
 
         # Set context for downstream stages — plan_path is the canonical location
         ctx.plan = plan
