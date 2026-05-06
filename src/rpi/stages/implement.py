@@ -48,6 +48,7 @@ def _run_verification_commands(
                 text=True,
                 cwd=worktree or None,
                 timeout=300,
+                start_new_session=True,
             )
         except subprocess.TimeoutExpired:
             return (False, f"Command timed out after 300s: {cmd}")
